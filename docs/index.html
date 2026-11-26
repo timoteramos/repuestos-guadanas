@@ -97,7 +97,39 @@
         </div>
       </section>
 
-      <!-- PESTAÑA 3: AUDITORÍA Y USUARIOS (SOLO ADMIN) -->
+      <!-- PESTAÑA 3: GASTOS DEL LOCAL -->
+      <section id="tab-gastos" class="tab-content hidden">
+        <div class="card">
+          <h3 style="margin-top:0;">Registrar Gasto del Local</h3>
+          <form id="form-gasto" onsubmit="guardarGasto(event)">
+            <select id="gasto-categoria" required>
+              <option value="Empleados">Empleados / Nómina</option>
+              <option value="Servicios">Servicios (Luz, Agua, Internet)</option>
+              <option value="Compras Local">Compras para el Local</option>
+              <option value="Otros">Otros Gastos</option>
+            </select>
+            <input type="text" id="gasto-descripcion" placeholder="Descripción (ej. Recibo luz / Pago turno empleado)" required>
+            <input type="number" id="gasto-monto" min="100" step="100" placeholder="Monto ($ COP)" required>
+            <select id="gasto-metodo">
+              <option value="Efectivo">Efectivo (Caja)</option>
+              <option value="Nequi">Nequi</option>
+              <option value="Daviplata">Daviplata</option>
+              <option value="Transferencia">Transferencia</option>
+            </select>
+            <button type="submit">Guardar Gasto</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="margin:0;">Historial de Gastos</h3>
+            <strong id="total-gastos-texto" style="color:var(--danger);">Total: $0</strong>
+          </div>
+          <div id="gastos-lista"></div>
+        </div>
+      </section>
+
+      <!-- PESTAÑA 4: AUDITORÍA Y USUARIOS -->
       <section id="tab-admin" class="tab-content hidden">
         <div class="card admin-only">
           <h3 style="margin-top:0;">Crear Cuenta de Empleado</h3>
@@ -128,6 +160,7 @@
     <nav class="bottom-nav">
       <button class="active" onclick="mostrarTab('tab-ventas', this)">Vender</button>
       <button onclick="mostrarTab('tab-inventario', this)">Inventario</button>
+      <button onclick="mostrarTab('tab-gastos', this)">Gastos</button>
       <button onclick="mostrarTab('tab-admin', this)">Cuenta / Logs</button>
     </nav>
   </div>

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'guadanas-pos-v1';
+const CACHE_NAME = 'guadanas-pos-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -27,7 +27,6 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // No cachear peticiones a la API de sincronización
   if (event.request.url.includes('/auth/') || event.request.url.includes('/sync/') || event.request.url.includes('/usuarios')) {
     return;
   }

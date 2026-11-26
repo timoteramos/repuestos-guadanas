@@ -1,4 +1,4 @@
-const API_URL = 'https://api-repuestos-guadanas.onrender.com'; // Luego la cambiaremos por tu URL de Render
+const API_URL = 'https://api-repuestos-guadanas.onrender.com';
 
 function getSession() {
   const data = localStorage.getItem('sesion_guadanas');
@@ -35,6 +35,7 @@ async function sincronizarDatos() {
     // 1. Buscar registros pendientes de subir (sincronizado === 0)
     const repuestosPendientes = await db.repuestos.where('sincronizado').equals(0).toArray();
     const ventasPendientes = await db.ventas.where('sincronizado').equals(0).toArray();
+    const gastosPendientes = await db.gastos.where('sincronizado').equals(0).toArray();
     const logsPendientes = await db.auditoria_logs.where('sincronizado').equals(0).toArray();
 
     for (let v of ventasPendientes) {
@@ -42,7 +43,12 @@ async function sincronizarDatos() {
     }
 
     // 2. PUSH: Enviar pendientes al servidor
-    if (repuestosPendientes.length > 0 || ventasPendientes.length > 0 || logsPendientes.length > 0) {
+    if (
+      repuestosPendientes.length > 0 ||
+      ventasPendientes.length > 0 ||
+      gastosPendientes.length > 0 ||
+      logsPendientes.length > 0
+    ) {
       const pushRes = await fetch(`${API_URL}/sync/push`, {
         method: 'POST',
         headers: {
@@ -52,17 +58,18 @@ async function sincronizarDatos() {
         body: JSON.stringify({
           repuestos: repuestosPendientes,
           ventas: ventasPendientes,
+          gastos: gastosPendientes,
           auditoria: logsPendientes
         })
       });
 
       if (pushRes.ok) {
-        // Marcar como sincronizados en el celular
         await db.repuestos.bulkPut(repuestosPendientes.map(r => ({ ...r, sincronizado: 1 })));
         await db.ventas.bulkPut(ventasPendientes.map(v => {
           const { detalles, ...ventaSinDetalles } = v;
           return { ...ventaSinDetalles, sincronizado: 1 };
         }));
+        await db.gastos.bulkPut(gastosPendientes.map(g => ({ ...g, sincronizado: 1 })));
         await db.auditoria_logs.bulkPut(logsPendientes.map(l => ({ ...l, sincronizado: 1 })));
       }
     }
@@ -81,6 +88,9 @@ async function sincronizarDatos() {
       if (data.repuestos?.length) {
         await db.repuestos.bulkPut(data.repuestos.map(r => ({ ...r, sincronizado: 1 })));
       }
+      if (data.gastos?.length) {
+        await db.gastos.bulkPut(data.gastos.map(g => ({ ...g, sincronizado: 1 })));
+      }
       if (data.auditoria?.length) {
         await db.auditoria_logs.bulkPut(data.auditoria.map(a => ({ ...a, sincronizado: 1 })));
       }
@@ -91,7 +101,7 @@ async function sincronizarDatos() {
   } catch (err) {
     console.warn('Sin conexión estable para sincronizar:', err);
   } finally {
-    if (btnSync) btnSync.textContent = 'Sincronizar Ahora';
+    if (btnSync) btnSync.textContent = 'Sincronizar';
   }
 }
 

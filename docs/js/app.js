@@ -13,7 +13,7 @@ function actualizarEstadoRed() {
     badge.textContent = 'En línea';
     badge.className = 'badge online';
   } else {
-    badge.textContent = 'Sin internet (Offline)';
+    badge.textContent = 'Sin internet';
     badge.className = 'badge offline';
   }
 }
@@ -69,7 +69,6 @@ function iniciarInterfaz(sesion) {
   document.getElementById('app-shell').classList.remove('hidden');
   document.getElementById('user-info').textContent = `${sesion.usuario.nombre} (${sesion.usuario.rol})`;
 
-  // Control de permisos por Rol (ADMIN vs VENDEDOR)
   const soloAdmin = document.querySelectorAll('.admin-only');
   soloAdmin.forEach(el => {
     if (sesion.usuario.rol === 'ADMIN') el.classList.remove('hidden');
@@ -110,7 +109,13 @@ async function guardarRepuesto(e) {
   };
 
   await db.repuestos.put(nuevoRepuesto);
-  await registrarAuditoria('repuestos', id, 'CREAR_REPUESTO', null, nuevoRepuesto);
+  // Log corto y legible para no desbordar pantallas móviles
+  await registrarAuditoria('repuestos', id, 'CREAR_REPUESTO', null, {
+    codigo: nuevoRepuesto.codigo,
+    nombre: nuevoRepuesto.nombre,
+    stock: nuevoRepuesto.stock_actual,
+    venta: nuevoRepuesto.precio_venta
+  });
 
   e.target.reset();
   await renderizarTodo();
@@ -132,6 +137,40 @@ async function ajustarStockRapido(id, delta) {
   await db.repuestos.put(rep);
   await registrarAuditoria('repuestos', id, 'AJUSTE_STOCK', { stock: stockAnterior }, { stock: rep.stock_actual, nombre: rep.nombre });
   await renderizarTodo();
+  sincronizarDatos();
+}
+
+// --- GASTOS DEL LOCAL ---
+async function guardarGasto(e) {
+  e.preventDefault();
+  const sesion = getSession();
+  if (!sesion) return;
+
+  const id = crypto.randomUUID();
+  const ahora = new Date().toISOString();
+  const nuevoGasto = {
+    id,
+    usuario_id: sesion.usuario.id,
+    categoria: document.getElementById('gasto-categoria').value,
+    descripcion: document.getElementById('gasto-descripcion').value.trim(),
+    monto: parseFloat(document.getElementById('gasto-monto').value) || 0,
+    metodo_pago: document.getElementById('gasto-metodo').value,
+    created_at: ahora,
+    updated_at: ahora,
+    sincronizado: 0
+  };
+
+  await db.gastos.put(nuevoGasto);
+  await registrarAuditoria('gastos', id, 'GASTO_REGISTRADO', null, {
+    categoria: nuevoGasto.categoria,
+    descripcion: nuevoGasto.descripcion,
+    monto: nuevoGasto.monto,
+    metodo: nuevoGasto.metodo_pago
+  });
+
+  e.target.reset();
+  await renderizarTodo();
+  alert('Gasto guardado correctamente.');
   sincronizarDatos();
 }
 
@@ -201,7 +240,6 @@ async function confirmarVenta() {
       sincronizado: 0
     });
 
-    // Descontar stock localmente en el celular de inmediato
     const repLocal = await db.repuestos.get(item.repuesto.id);
     if (repLocal) {
       repLocal.stock_actual = Math.max(0, repLocal.stock_actual - item.cantidad);
@@ -271,6 +309,29 @@ async function crearNuevoUsuario(e) {
   }
 }
 
+// Formatear detalle de auditoría de forma corta y limpia para móvil
+function formatearDetalleLog(accion, det) {
+  if (!det) return '';
+  if (typeof det === 'string') return det;
+
+  if (accion === 'CREAR_REPUESTO') {
+    const stock = det.stock ?? det.stock_actual ?? 0;
+    const venta = det.venta ?? det.precio_venta ?? 0;
+    return `${det.nombre || ''} (Cód: ${det.codigo || '-'}) • Stock: ${stock} • Venta: $${Number(venta).toLocaleString('es-CO')}`;
+  }
+  if (accion === 'AJUSTE_STOCK') {
+    return `${det.nombre || 'Repuesto'} • Nuevo stock: ${det.stock}`;
+  }
+  if (accion === 'VENTA_REGISTRADA') {
+    const items = Array.isArray(det.items) ? det.items.join(', ') : '';
+    return `${items} • Total: $${Number(det.total || 0).toLocaleString('es-CO')} (${det.metodo || ''}) • Cliente: ${det.cliente || 'Mostrador'}`;
+  }
+  if (accion === 'GASTO_REGISTRADO') {
+    return `${det.categoria || ''}: ${det.descripcion || ''} • -$${Number(det.monto || 0).toLocaleString('es-CO')} (${det.metodo || ''})`;
+  }
+  return JSON.stringify(det);
+}
+
 // --- RENDERIZADO DE PANTALLAS ---
 async function renderizarTodo() {
   const sesion = getSession();
@@ -327,7 +388,31 @@ async function renderizarTodo() {
       </div>`;
   });
 
-  // 3. Historial de Auditoría (Solo ADMIN)
+  // 3. Lista de Gastos del Local
+  const gastos = await db.gastos.orderBy('created_at').reverse().toArray();
+  const gastosLista = document.getElementById('gastos-lista');
+  const totalGastosEl = document.getElementById('total-gastos-texto');
+  let totalGastos = 0;
+
+  if (gastosLista) {
+    gastosLista.innerHTML = gastos.length === 0 ? '<p style="color:var(--muted);">No hay gastos registrados aún.</p>' : '';
+    gastos.forEach(g => {
+      totalGastos += Number(g.monto || 0);
+      const fecha = new Date(g.created_at).toLocaleString('es-CO');
+      gastosLista.innerHTML += `
+        <div class="gasto-entry">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong>${g.categoria}</strong>
+            <strong style="color:var(--danger);">-$${Number(g.monto).toLocaleString('es-CO')}</strong>
+          </div>
+          <div class="log-detalle">${g.descripcion} (${g.metodo_pago})</div>
+          <small style="color:var(--muted);">${fecha} • ${g.sincronizado ? '☁️ Respaldado' : '📱 Pendiente subir'}</small>
+        </div>`;
+    });
+  }
+  if (totalGastosEl) totalGastosEl.textContent = `Total: $${totalGastos.toLocaleString('es-CO')}`;
+
+  // 4. Historial de Auditoría (Solo ADMIN)
   if (esAdmin) {
     const usuarios = await db.usuarios.toArray();
     const mapaUsuarios = Object.fromEntries(usuarios.map(u => [u.id, u.nombre]));
@@ -338,11 +423,12 @@ async function renderizarTodo() {
     logs.forEach(l => {
       const autor = mapaUsuarios[l.usuario_id] || sesion.usuario.nombre;
       const fecha = new Date(l.fecha_hora).toLocaleString('es-CO');
+      const resumen = formatearDetalleLog(l.accion, l.detalle_nuevo);
       auditCont.innerHTML += `
         <div class="log-entry">
           <strong>${l.accion}</strong> — por <strong>${autor}</strong><br>
-          <small>${fecha} ${l.sincronizado ? '☁️ Respaldado' : '📱 Pendiente subir'}</small><br>
-          <code>${JSON.stringify(l.detalle_nuevo || {})}</code>
+          <small>${fecha} ${l.sincronizado ? '☁️ Respaldado' : '📱 Pendiente subir'}</small>
+          <div class="log-detalle">${resumen}</div>
         </div>`;
     });
   }

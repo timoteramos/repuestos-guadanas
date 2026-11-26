@@ -47,6 +47,17 @@ class DetalleVenta(Base):
     precio_unitario = Column(Numeric(12, 2), nullable=False)
     subtotal = Column(Numeric(12, 2), nullable=False)
 
+class Gasto(Base):
+    __tablename__ = "gastos"
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
+    categoria = Column(String(50), nullable=False)
+    descripcion = Column(String(255), nullable=False)
+    monto = Column(Numeric(12, 2), nullable=False)
+    metodo_pago = Column(String(30), default="Efectivo")
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
 class AuditoriaLog(Base):
     __tablename__ = "auditoria_logs"
     id = Column(UUID(as_uuid=True), primary_key=True)

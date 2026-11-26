@@ -6,13 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models import Usuario, Repuesto, Venta, DetalleVenta, AuditoriaLog
+from database import get_db, engine
+from models import Base, Usuario, Repuesto, Venta, DetalleVenta, AuditoriaLog, Gasto
 from auth import hash_password, verify_password, create_access_token, get_current_user, require_admin
+
+# Crea la tabla "gastos" en Neon automáticamente si aún no existe
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="API Repuestos de Guadañas Offline-First")
 
-# Permitir peticiones desde el frontend en celulares
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,6 +67,16 @@ class VentaSync(BaseModel):
     updated_at: datetime
     detalles: List[DetalleVentaSync]
 
+class GastoSync(BaseModel):
+    id: uuid.UUID
+    usuario_id: uuid.UUID
+    categoria: str
+    descripcion: str
+    monto: float
+    metodo_pago: str = "Efectivo"
+    created_at: datetime
+    updated_at: datetime
+
 class AuditoriaSync(BaseModel):
     id: uuid.UUID
     usuario_id: uuid.UUID
@@ -78,13 +90,13 @@ class AuditoriaSync(BaseModel):
 class PushPayload(BaseModel):
     repuestos: List[RepuestoSync] = []
     ventas: List[VentaSync] = []
+    gastos: List[GastoSync] = []
     auditoria: List[AuditoriaSync] = []
 
 # --- ENDPOINTS DE AUTENTICACIÓN ---
 
 @app.post("/setup-admin")
 def crear_primer_admin(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
-    """Solo funciona si aún no existe ningún usuario en la base de datos."""
     existe = db.query(Usuario).first()
     if existe:
         raise HTTPException(status_code=400, detail="Ya existe un administrador. Inicia sesión para crear más usuarios.")
@@ -145,7 +157,6 @@ def crear_usuario(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
 
 @app.post("/sync/push")
 def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Recibe cambios creados o editados en los celulares sin internet."""
     # 1. Sincronizar Repuestos (Solo ADMIN puede crear/editar catálogo)
     if current_user.rol == "ADMIN":
         for item in payload.repuestos:
@@ -153,7 +164,6 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
             if not existente:
                 db.add(Repuesto(**item.model_dump()))
             else:
-                # Last-Write-Wins: Solo actualiza si el cambio del celular es más reciente
                 if item.updated_at > existente.updated_at:
                     for key, value in item.model_dump().items():
                         setattr(existente, key, value)
@@ -177,13 +187,17 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
 
             for det in v.detalles:
                 db.add(DetalleVenta(**det.model_dump()))
-                # Descontar stock en el servidor de forma segura
                 rep = db.query(Repuesto).filter(Repuesto.id == det.repuesto_id).first()
                 if rep and v.estado == "COMPLETADA":
                     rep.stock_actual -= det.cantidad
                     rep.updated_at = datetime.now(timezone.utc)
 
-    # 3. Guardar Logs de Auditoría (Inmutables)
+    # 3. Sincronizar Gastos del Local
+    for g in payload.gastos:
+        if not db.query(Gasto).filter(Gasto.id == g.id).first():
+            db.add(Gasto(**g.model_dump()))
+
+    # 4. Guardar Logs de Auditoría (Inmutables)
     for log in payload.auditoria:
         if not db.query(AuditoriaLog).filter(AuditoriaLog.id == log.id).first():
             db.add(AuditoriaLog(**log.model_dump()))
@@ -193,21 +207,19 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
 
 @app.get("/sync/pull")
 def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Envía al celular todos los cambios ocurridos desde su última sincronización."""
     query_repuestos = db.query(Repuesto)
-    query_ventas = db.query(Venta)
+    query_gastos = db.query(Gasto)
     query_auditoria = db.query(AuditoriaLog)
 
     if since:
         fecha_desde = datetime.fromisoformat(since)
         query_repuestos = query_repuestos.filter(Repuesto.updated_at > fecha_desde)
-        query_ventas = query_ventas.filter(Venta.updated_at > fecha_desde)
+        query_gastos = query_gastos.filter(Gasto.updated_at > fecha_desde)
         query_auditoria = query_auditoria.filter(AuditoriaLog.fecha_hora > fecha_desde)
 
     repuestos = query_repuestos.all()
+    gastos = query_gastos.order_by(Gasto.created_at.desc()).all() if current_user.rol == "ADMIN" else []
     usuarios = db.query(Usuario.id, Usuario.nombre, Usuario.rol, Usuario.activo).all()
-    
-    # Solo el ADMIN descarga los logs de auditoría completos
     logs = query_auditoria.order_by(AuditoriaLog.fecha_hora.desc()).limit(200).all() if current_user.rol == "ADMIN" else []
 
     return {
@@ -229,6 +241,19 @@ def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_c
                 "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,
             }
             for r in repuestos
+        ],
+        "gastos": [
+            {
+                "id": str(g.id),
+                "usuario_id": str(g.usuario_id),
+                "categoria": g.categoria,
+                "descripcion": g.descripcion,
+                "monto": float(g.monto),
+                "metodo_pago": g.metodo_pago,
+                "created_at": g.created_at.isoformat(),
+                "updated_at": g.updated_at.isoformat()
+            }
+            for g in gastos
         ],
         "auditoria": [
             {

@@ -10,7 +10,15 @@
 }
 
 * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
-body { margin: 0; background: var(--bg); color: var(--text); padding-bottom: 70px; }
+
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  padding-bottom: 72px;
+}
 
 .hidden { display: none !important; }
 
@@ -43,23 +51,40 @@ button.secondary { background: #334155; }
 button.danger { background: var(--danger); }
 button.small { width: auto; padding: 6px 12px; font-size: 13px; margin: 0; }
 
-/* Navegación inferior tipo App móvil */
+/* Navegación inferior tipo App móvil (4 columnas fijas) */
 .bottom-nav {
   position: fixed; bottom: 0; left: 0; right: 0; background: white;
-  border-top: 1px solid var(--border); display: flex; justify-content: space-around;
-  padding: 8px 0; z-index: 100;
+  border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  width: 100%; max-width: 100vw;
+  padding: 6px 0; z-index: 100;
 }
 .bottom-nav button {
-  background: none; color: var(--muted); border: none; margin: 0; padding: 6px;
-  font-size: 12px; border-radius: 0;
+  background: none; color: var(--muted); border: none; margin: 0;
+  min-width: 0; padding: 8px 4px; font-size: 0.78rem; border-radius: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .bottom-nav button.active { color: var(--primary); font-weight: bold; }
 
-/* Listas de repuestos y carrito */
+/* Listas de repuestos, gastos y carrito */
 .item-row {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 0; border-bottom: 1px solid var(--border);
+  padding: 10px 0; border-bottom: 1px solid var(--border); gap: 8px;
 }
 .item-row:last-child { border-bottom: none; }
 .stock-low { color: var(--danger); font-weight: bold; }
-.log-entry { font-size: 13px; padding: 8px; border-left: 3px solid var(--primary); background: #f8fafc; margin-bottom: 8px; }
+
+.log-entry {
+  font-size: 13px; padding: 10px; border-left: 3px solid var(--primary);
+  background: #f8fafc; margin-bottom: 8px; border-radius: 6px;
+}
+.log-detalle {
+  font-size: 0.85rem; color: #334155;
+  word-break: break-word; overflow-wrap: anywhere;
+  margin-top: 4px;
+}
+
+.gasto-entry {
+  font-size: 13px; padding: 10px; border-left: 3px solid var(--danger);
+  background: #f8fafc; margin-bottom: 8px; border-radius: 6px;
+}
