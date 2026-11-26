@@ -1,4 +1,4 @@
-const API_URL = 'http://127.0.0.1:8000'; // Luego la cambiaremos por tu URL de Render
+const API_URL = 'https://api-repuestos-guadanas.onrender.com'; // Luego la cambiaremos por tu URL de Render
 
 function getSession() {
   const data = localStorage.getItem('sesion_guadanas');
