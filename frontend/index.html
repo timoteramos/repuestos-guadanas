@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Repuestos Guadañas POS</title>
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="stylesheet" href="./css/styles.css">
+  <script src="https://unpkg.com/dexie@4.0.8/dist/dexie.js"></script>
+</head>
+<body>
+
+  <!-- PANTALLA DE LOGIN -->
+  <div id="view-login" class="container" style="margin-top: 40px;">
+    <div class="card">
+      <h2 style="margin-top:0;">Repuestos Guadañas</h2>
+      <p style="color:var(--muted); font-size:14px;">Inicia sesión con tu cuenta autorizada para operar offline u online.</p>
+      <form onsubmit="iniciarSesion(event)">
+        <input type="email" id="login-email" placeholder="Correo electrónico" required>
+        <input type="password" id="login-pass" placeholder="Contraseña" required>
+        <button type="submit">Entrar al Sistema</button>
+      </form>
+      <p id="login-error" style="color:var(--danger); font-size:14px;"></p>
+    </div>
+  </div>
+
+  <!-- APLICACIÓN PRINCIPAL -->
+  <div id="app-shell" class="hidden">
+    <header class="topbar">
+      <div>
+        <strong style="display:block;">Guadañas POS</strong>
+        <small id="user-info" style="color:#94a3b8;"></small>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span id="net-status" class="badge online">En línea</span>
+        <button id="btn-sync" class="small secondary" onclick="sincronizarDatos()">Sincronizar</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- PESTAÑA 1: PUNTO DE VENTA (POS) -->
+      <section id="tab-ventas" class="tab-content">
+        <div class="card">
+          <h3 style="margin-top:0;">Nueva Venta</h3>
+          <input type="text" id="buscador-repuestos" placeholder="Buscar por nombre, código o marca (ej. Stihl FS220)..." oninput="renderizarTodo()">
+          <div id="pos-resultados"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">Carrito Actual</h3>
+          <div id="carrito-lista"><p style="color:var(--muted);">Carrito vacío</p></div>
+          <hr>
+          <div style="display:flex; justify-content:space-between; font-size:18px; margin-bottom:10px;">
+            <span>Total a cobrar:</span>
+            <strong id="carrito-total">$0</strong>
+          </div>
+          <input type="text" id="venta-cliente" placeholder="Nombre del cliente (opcional - Mostrador)">
+          <select id="venta-metodo">
+            <option value="Efectivo">Efectivo</option>
+            <option value="Nequi">Nequi</option>
+            <option value="Daviplata">Daviplata</option>
+            <option value="Transferencia">Transferencia</option>
+            <option value="Fiado">Crédito / Fiado</option>
+          </select>
+          <button onclick="confirmarVenta()">Registrar Venta</button>
+        </div>
+      </section>
+
+      <!-- PESTAÑA 2: INVENTARIO -->
+      <section id="tab-inventario" class="tab-content hidden">
+        <div class="card admin-only">
+          <h3 style="margin-top:0;">Agregar Repuesto al Catálogo</h3>
+          <form onsubmit="guardarRepuesto(event)">
+            <input type="text" id="rep-codigo" placeholder="Código / Referencia (ej. BUJ-01)" required>
+            <input type="text" id="rep-nombre" placeholder="Nombre (ej. Carrete Nylon Automático)" required>
+            <input type="text" id="rep-marca" placeholder="Compatible con (ej. Stihl FS120/220, Husqvarna 143R)">
+            <select id="rep-categoria">
+              <option value="Motor">Motor (Cilindros, Pistones, Anillos)</option>
+              <option value="Corte">Corte (Cuchillas, Carretes, Nylon)</option>
+              <option value="Carburacion">Carburación y Filtros</option>
+              <option value="Encendido">Encendido (Bujías, Bobinas)</option>
+              <option value="Transmision">Transmisión y Embrague</option>
+              <option value="Consumibles">Consumibles (Aceite 2T, Grasa)</option>
+            </select>
+            <input type="number" id="rep-compra" placeholder="Precio de compra (Costo)" required>
+            <input type="number" id="rep-venta" placeholder="Precio de venta al público" required>
+            <input type="number" id="rep-stock" placeholder="Cantidad inicial en stock" required>
+            <input type="number" id="rep-minimo" placeholder="Alerta stock mínimo (ej. 3)" value="3">
+            <button type="submit">Guardar Repuesto</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">Inventario Actual</h3>
+          <div id="inventario-lista"></div>
+        </div>
+      </section>
+
+      <!-- PESTAÑA 3: AUDITORÍA Y USUARIOS (SOLO ADMIN) -->
+      <section id="tab-admin" class="tab-content hidden">
+        <div class="card admin-only">
+          <h3 style="margin-top:0;">Crear Cuenta de Empleado</h3>
+          <form onsubmit="crearNuevoUsuario(event)">
+            <input type="text" id="usr-nombre" placeholder="Nombre del empleado" required>
+            <input type="email" id="usr-email" placeholder="Correo electrónico" required>
+            <input type="password" id="usr-pass" placeholder="Contraseña" required>
+            <select id="usr-rol">
+              <option value="VENDEDOR">Vendedor (Solo ventas y consulta)</option>
+              <option value="ADMIN">Administrador (Acceso total)</option>
+            </select>
+            <button type="submit">Registrar Usuario</button>
+          </form>
+        </div>
+
+        <div class="card admin-only">
+          <h3 style="margin-top:0;">Auditoría de Cambios (Quién y Cuándo)</h3>
+          <div id="auditoria-lista"></div>
+        </div>
+
+        <div class="card">
+          <button class="danger" onclick="cerrarSesion()">Cerrar Sesión</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- BARRA INFERIOR DE NAVEGACIÓN -->
+    <nav class="bottom-nav">
+      <button class="active" onclick="mostrarTab('tab-ventas', this)">Vender</button>
+      <button onclick="mostrarTab('tab-inventario', this)">Inventario</button>
+      <button onclick="mostrarTab('tab-admin', this)">Cuenta / Logs</button>
+    </nav>
+  </div>
+
+  <script src="./js/db.js"></script>
+  <script src="./js/sync.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>

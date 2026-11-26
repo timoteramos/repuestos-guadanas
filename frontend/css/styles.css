@@ -1,0 +1,65 @@
+:root {
+  --primary: #16a34a;
+  --primary-dark: #15803d;
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --danger: #dc2626;
+  --border: #e2e8f0;
+}
+
+* { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+body { margin: 0; background: var(--bg); color: var(--text); padding-bottom: 70px; }
+
+.hidden { display: none !important; }
+
+/* Barra superior */
+.topbar {
+  background: #0f172a; color: white; padding: 12px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  position: sticky; top: 0; z-index: 100;
+}
+.badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: bold; }
+.badge.online { background: #16a34a; color: white; }
+.badge.offline { background: #dc2626; color: white; }
+
+/* Contenedores y tarjetas */
+.container { max-width: 720px; margin: 0 auto; padding: 16px; }
+.card {
+  background: var(--card); border-radius: 12px; padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 14px;
+}
+
+input, select, button {
+  width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border);
+  font-size: 15px; margin-bottom: 10px;
+}
+button {
+  background: var(--primary); color: white; border: none; font-weight: 600; cursor: pointer;
+}
+button:active { background: var(--primary-dark); }
+button.secondary { background: #334155; }
+button.danger { background: var(--danger); }
+button.small { width: auto; padding: 6px 12px; font-size: 13px; margin: 0; }
+
+/* Navegación inferior tipo App móvil */
+.bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0; background: white;
+  border-top: 1px solid var(--border); display: flex; justify-content: space-around;
+  padding: 8px 0; z-index: 100;
+}
+.bottom-nav button {
+  background: none; color: var(--muted); border: none; margin: 0; padding: 6px;
+  font-size: 12px; border-radius: 0;
+}
+.bottom-nav button.active { color: var(--primary); font-weight: bold; }
+
+/* Listas de repuestos y carrito */
+.item-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.item-row:last-child { border-bottom: none; }
+.stock-low { color: var(--danger); font-weight: bold; }
+.log-entry { font-size: 13px; padding: 8px; border-left: 3px solid var(--primary); background: #f8fafc; margin-bottom: 8px; }
