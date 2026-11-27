@@ -4,14 +4,19 @@ from typing import List, Optional, Any
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db, engine
 from models import Base, Usuario, Repuesto, Venta, DetalleVenta, AuditoriaLog, Gasto
 from auth import hash_password, verify_password, create_access_token, get_current_user, require_admin
 
-# Crea la tabla "gastos" en Neon automáticamente si aún no existe
 Base.metadata.create_all(bind=engine)
+
+# Agregar columnas nuevas (foto y created_at) en Neon sin perder registros previos
+with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS foto TEXT"))
+    conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"))
 
 app = FastAPI(title="API Repuestos de Guadañas Offline-First")
 
@@ -32,18 +37,20 @@ class CrearUsuarioRequest(BaseModel):
     nombre: str
     email: str
     password: str
-    rol: str  # 'ADMIN' o 'VENDEDOR'
+    rol: str
 
 class RepuestoSync(BaseModel):
     id: uuid.UUID
     codigo: str
     nombre: str
     marca_compatible: Optional[str] = ""
-    categoria: Optional[str] = ""
+    categoria: Optional[str] = "General"
+    foto: Optional[str] = None
     precio_compra: float
     precio_venta: float
     stock_actual: int
     stock_minimo: int = 3
+    created_at: Optional[datetime] = None
     updated_at: datetime
     updated_by: Optional[uuid.UUID] = None
     deleted_at: Optional[datetime] = None
@@ -157,18 +164,24 @@ def crear_usuario(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
 
 @app.post("/sync/push")
 def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    # 1. Sincronizar Repuestos (Solo ADMIN puede crear/editar catálogo)
     if current_user.rol == "ADMIN":
         for item in payload.repuestos:
             existente = db.query(Repuesto).filter(Repuesto.id == item.id).first()
             if not existente:
-                db.add(Repuesto(**item.model_dump()))
+                existente_codigo = db.query(Repuesto).filter(Repuesto.codigo == item.codigo).first()
+                if existente_codigo:
+                    existente = existente_codigo
+            if not existente:
+                datos = item.model_dump()
+                if not datos.get("created_at"):
+                    datos["created_at"] = item.updated_at
+                db.add(Repuesto(**datos))
             else:
-                if item.updated_at > existente.updated_at:
+                if item.updated_at >= existente.updated_at:
                     for key, value in item.model_dump().items():
-                        setattr(existente, key, value)
+                        if key != "id":
+                            setattr(existente, key, value)
 
-    # 2. Sincronizar Ventas nuevas y descontar stock en el servidor
     for v in payload.ventas:
         venta_existente = db.query(Venta).filter(Venta.id == v.id).first()
         if not venta_existente:
@@ -189,15 +202,13 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
                 db.add(DetalleVenta(**det.model_dump()))
                 rep = db.query(Repuesto).filter(Repuesto.id == det.repuesto_id).first()
                 if rep and v.estado == "COMPLETADA":
-                    rep.stock_actual -= det.cantidad
+                    rep.stock_actual = max(0, rep.stock_actual - det.cantidad)
                     rep.updated_at = datetime.now(timezone.utc)
 
-    # 3. Sincronizar Gastos del Local
     for g in payload.gastos:
         if not db.query(Gasto).filter(Gasto.id == g.id).first():
             db.add(Gasto(**g.model_dump()))
 
-    # 4. Guardar Logs de Auditoría (Inmutables)
     for log in payload.auditoria:
         if not db.query(AuditoriaLog).filter(AuditoriaLog.id == log.id).first():
             db.add(AuditoriaLog(**log.model_dump()))
@@ -231,11 +242,13 @@ def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_c
                 "codigo": r.codigo,
                 "nombre": r.nombre,
                 "marca_compatible": r.marca_compatible,
-                "categoria": r.categoria,
+                "categoria": r.categoria or "General",
+                "foto": r.foto,
                 "precio_compra": float(r.precio_compra) if current_user.rol == "ADMIN" else 0,
                 "precio_venta": float(r.precio_venta),
                 "stock_actual": r.stock_actual,
                 "stock_minimo": r.stock_minimo,
+                "created_at": r.created_at.isoformat() if r.created_at else r.updated_at.isoformat(),
                 "updated_at": r.updated_at.isoformat(),
                 "updated_by": str(r.updated_by) if r.updated_by else None,
                 "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,

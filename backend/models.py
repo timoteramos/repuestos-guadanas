@@ -8,7 +8,7 @@ class Usuario(Base):
     nombre = Column(String(100), nullable=False)
     email = Column(String(120), unique=True, nullable=False)
     password_hash = Column(Text, nullable=False)
-    rol = Column(String(20), nullable=False)  # 'ADMIN' o 'VENDEDOR'
+    rol = Column(String(20), nullable=False)
     activo = Column(Boolean, default=True)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -18,11 +18,13 @@ class Repuesto(Base):
     codigo = Column(String(50), unique=True, nullable=False)
     nombre = Column(String(150), nullable=False)
     marca_compatible = Column(String(100))
-    categoria = Column(String(50))
+    categoria = Column(String(50), default="General")
+    foto = Column(Text, nullable=True)
     precio_compra = Column(Numeric(12, 2), nullable=False, default=0)
     precio_venta = Column(Numeric(12, 2), nullable=False)
     stock_actual = Column(Integer, nullable=False, default=0)
     stock_minimo = Column(Integer, nullable=False, default=3)
+    created_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=False)
     updated_by = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
     deleted_at = Column(DateTime(timezone=True), nullable=True)

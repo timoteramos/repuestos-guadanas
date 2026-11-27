@@ -43,7 +43,7 @@
       <section id="tab-ventas" class="tab-content">
         <div class="card">
           <h3 style="margin-top:0;">Nueva Venta</h3>
-          <input type="text" id="buscador-repuestos" placeholder="Buscar por nombre, código o marca (ej. Stihl FS220)..." oninput="renderizarTodo()">
+          <input type="text" id="buscador-repuestos" placeholder="Buscar por nombre, código o marca..." oninput="renderizarTodo()">
           <div id="pos-resultados"></div>
         </div>
 
@@ -69,30 +69,54 @@
 
       <!-- PESTAÑA 2: INVENTARIO -->
       <section id="tab-inventario" class="tab-content hidden">
-        <div class="card admin-only">
-          <h3 style="margin-top:0;">Agregar Repuesto al Catálogo</h3>
-          <form onsubmit="guardarRepuesto(event)">
-            <input type="text" id="rep-codigo" placeholder="Código / Referencia (ej. BUJ-01)" required>
-            <input type="text" id="rep-nombre" placeholder="Nombre (ej. Carrete Nylon Automático)" required>
-            <input type="text" id="rep-marca" placeholder="Compatible con (ej. Stihl FS120/220, Husqvarna 143R)">
-            <select id="rep-categoria">
-              <option value="Motor">Motor (Cilindros, Pistones, Anillos)</option>
-              <option value="Corte">Corte (Cuchillas, Carretes, Nylon)</option>
-              <option value="Carburacion">Carburación y Filtros</option>
-              <option value="Encendido">Encendido (Bujías, Bobinas)</option>
-              <option value="Transmision">Transmisión y Embrague</option>
-              <option value="Consumibles">Consumibles (Aceite 2T, Grasa)</option>
-            </select>
+        <!-- Botón superior para desplegar el formulario -->
+        <div class="admin-only" style="margin-bottom: 12px;">
+          <button id="btn-toggle-registro" onclick="toggleFormularioProducto()">+ Registrar Producto en Inventario</button>
+        </div>
+
+        <!-- Formulario oculto por defecto -->
+        <div id="card-registro-producto" class="card admin-only hidden">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="margin:0;">Registrar Producto</h3>
+            <button type="button" class="small secondary" onclick="toggleFormularioProducto()">Cerrar</button>
+          </div>
+
+          <form id="form-producto" onsubmit="guardarRepuesto(event)">
+            <input type="text" id="rep-codigo" placeholder="Código / Referencia (ej. BUJ-01)" oninput="verificarCodigoExistente()" required>
+
+            <!-- Aviso automático si el código ya existía (ej. estaba en cantidad 0) -->
+            <div id="aviso-producto-existente" class="aviso-existente hidden">
+              <div id="texto-producto-existente" style="margin-bottom:6px;"></div>
+              <button type="button" class="small" onclick="rellenarProductoExistente()">Rellenar datos anteriores y sumar cantidad</button>
+            </div>
+
+            <input type="text" id="rep-nombre" placeholder="Nombre del producto (ej. Carrete Nylon)" required>
+            <input type="text" id="rep-marca" placeholder="Compatible con (ej. Stihl FS120/220, Husqvarna)">
             <input type="number" id="rep-compra" placeholder="Precio de compra (Costo)" required>
             <input type="number" id="rep-venta" placeholder="Precio de venta al público" required>
-            <input type="number" id="rep-stock" placeholder="Cantidad inicial en stock" required>
-            <input type="number" id="rep-minimo" placeholder="Alerta stock mínimo (ej. 3)" value="3">
-            <button type="submit">Guardar Repuesto</button>
+            <input type="number" id="rep-stock" placeholder="Cantidad a ingresar" min="1" required>
+            <input type="number" id="rep-minimo" placeholder="Alerta cantidad mínima (ej. 3)" value="3">
+
+            <label style="display:block; font-size:13px; color:var(--muted); margin-bottom:4px;">Foto del producto (opcional)</label>
+            <input type="file" id="rep-foto" accept="image/*" capture="environment" onchange="previsualizarFoto(event)">
+            <div id="preview-foto-box" class="hidden" style="margin-bottom:10px; text-align:center;">
+              <img id="preview-foto-img" src="" alt="Vista previa" style="max-height:110px; border-radius:8px; border:1px solid var(--border);">
+              <br>
+              <button type="button" class="small danger" style="margin-top:4px;" onclick="limpiarFoto()">Quitar foto</button>
+            </div>
+
+            <button type="submit">Guardar en Inventario</button>
           </form>
         </div>
 
         <div class="card">
           <h3 style="margin-top:0;">Inventario Actual</h3>
+          <input type="text" id="buscador-inventario" placeholder="Filtrar inventario por nombre o código..." oninput="renderizarTodo()">
+          <div class="filtros-bar">
+            <button type="button" class="active" onclick="cambiarFiltroInventario('todos', this)">Todos</button>
+            <button type="button" onclick="cambiarFiltroInventario('disponibles', this)">Con cantidad</button>
+            <button type="button" onclick="cambiarFiltroInventario('agotados', this)">Agotados (0)</button>
+          </div>
           <div id="inventario-lista"></div>
         </div>
       </section>
