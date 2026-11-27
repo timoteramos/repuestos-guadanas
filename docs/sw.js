@@ -1,4 +1,4 @@
-const CACHE_NAME = 'guadanas-pos-v3';
+const CACHE_NAME = 'guadanas-pos-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -7,7 +7,8 @@ const ASSETS = [
   './js/db.js',
   './js/sync.js',
   './js/app.js',
-  'https://unpkg.com/dexie@4.0.8/dist/dexie.js'
+  'https://unpkg.com/dexie@4.0.8/dist/dexie.js',
+  'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
 ];
 
 self.addEventListener('install', (event) => {

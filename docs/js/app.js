@@ -1,9 +1,9 @@
 let carrito = [];
 let filtroInventarioActual = 'todos';
+let tablaVentasActual = 'ventas';
 let fotoBase64Actual = null;
 let productoExistenteDetectado = null;
 
-// Registrar Service Worker para que funcione sin internet
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(console.error);
 }
@@ -75,6 +75,10 @@ function iniciarInterfaz(sesion) {
     if (sesion.usuario.rol === 'ADMIN') el.classList.remove('hidden');
     else el.classList.add('hidden');
   });
+
+  // Asegurar que el formulario de producto siempre arranque oculto al entrar
+  const cardReg = document.getElementById('card-registro-producto');
+  if (cardReg) cardReg.classList.add('hidden');
 }
 
 function mostrarTab(tabId, btn) {
@@ -82,26 +86,96 @@ function mostrarTab(tabId, btn) {
   document.getElementById(tabId).classList.remove('hidden');
   document.querySelectorAll('.bottom-nav button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
-}
 
-// --- FORMULARIO DESPLEGABLE, AUTO-RELLENO Y FOTO DE PRODUCTO ---
-function toggleFormularioProducto(forzarAbrir = null) {
-  const card = document.getElementById('card-registro-producto');
-  const btn = document.getElementById('btn-toggle-registro');
-  const abrir = forzarAbrir !== null ? forzarAbrir : card.classList.contains('hidden');
-
-  if (abrir) {
-    card.classList.remove('hidden');
-    btn.textContent = 'Ocultar Formulario de Registro';
-  } else {
-    card.classList.add('hidden');
-    btn.textContent = '+ Registrar Producto en Inventario';
-    productoExistenteDetectado = null;
-    document.getElementById('aviso-producto-existente').classList.add('hidden');
+  if (tabId === 'tab-inventario') {
+    cerrarFormularioProducto();
   }
 }
 
+// --- FORMULARIO DESPLEGABLE, EDITAR, ELIMINAR Y AUTO-RELLENO ---
+function abrirNuevoProducto() {
+  document.getElementById('form-producto').reset();
+  document.getElementById('rep-edit-id').value = '';
+  document.getElementById('titulo-form-producto').textContent = 'Registrar Producto';
+  document.getElementById('btn-submit-producto').textContent = 'Guardar en Inventario';
+  document.getElementById('rep-stock').placeholder = 'Cantidad';
+  productoExistenteDetectado = null;
+  document.getElementById('aviso-producto-existente').classList.add('hidden');
+  limpiarFoto();
+
+  document.getElementById('card-registro-producto').classList.remove('hidden');
+  document.getElementById('btn-toggle-registro').classList.add('hidden');
+}
+
+function cerrarFormularioProducto() {
+  const card = document.getElementById('card-registro-producto');
+  const btn = document.getElementById('btn-toggle-registro');
+  if (card) card.classList.add('hidden');
+  if (btn && getSession()?.usuario?.rol === 'ADMIN') btn.classList.remove('hidden');
+  document.getElementById('rep-edit-id').value = '';
+  productoExistenteDetectado = null;
+  document.getElementById('aviso-producto-existente').classList.add('hidden');
+  limpiarFoto();
+}
+
+async function editarProductoInventario(id) {
+  const sesion = getSession();
+  if (sesion.usuario.rol !== 'ADMIN') return;
+
+  const p = await db.repuestos.get(id);
+  if (!p) return;
+
+  document.getElementById('rep-edit-id').value = p.id;
+  document.getElementById('rep-codigo').value = p.codigo;
+  document.getElementById('rep-nombre').value = p.nombre;
+  document.getElementById('rep-marca').value = p.marca_compatible || '';
+  document.getElementById('rep-compra').value = p.precio_compra || 0;
+  document.getElementById('rep-venta').value = p.precio_venta || 0;
+  document.getElementById('rep-stock').value = Math.max(0, p.stock_actual);
+
+  document.getElementById('titulo-form-producto').textContent = 'Modificar Producto';
+  document.getElementById('btn-submit-producto').textContent = 'Actualizar Producto';
+  document.getElementById('aviso-producto-existente').classList.add('hidden');
+
+  if (p.foto) {
+    fotoBase64Actual = p.foto;
+    document.getElementById('preview-foto-img').src = p.foto;
+    document.getElementById('preview-foto-box').classList.remove('hidden');
+  } else {
+    limpiarFoto();
+  }
+
+  document.getElementById('card-registro-producto').classList.remove('hidden');
+  document.getElementById('btn-toggle-registro').classList.add('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function eliminarProductoDefinitivo(id) {
+  const sesion = getSession();
+  if (sesion.usuario.rol !== 'ADMIN') return;
+
+  const p = await db.repuestos.get(id);
+  if (!p) return;
+
+  if (!confirm(`¿Eliminar por completo "${p.nombre}" (${p.codigo}) del inventario? Esta acción no se puede deshacer.`)) {
+    return;
+  }
+
+  await db.repuestos.delete(id);
+  await db.repuestos_eliminados.put({ id });
+  await registrarAuditoria('repuestos', id, 'ELIMINAR_PRODUCTO', null, {
+    codigo: p.codigo,
+    nombre: p.nombre
+  });
+
+  await renderizarTodo();
+  sincronizarDatos();
+}
+
 async function verificarCodigoExistente() {
+  // Si está editando un producto existente, no mostrar el aviso de duplicado
+  if (document.getElementById('rep-edit-id').value) return;
+
   const codigo = document.getElementById('rep-codigo').value.trim().toUpperCase();
   const aviso = document.getElementById('aviso-producto-existente');
   const texto = document.getElementById('texto-producto-existente');
@@ -115,7 +189,7 @@ async function verificarCodigoExistente() {
   const encontrado = await db.repuestos.where('codigo').equals(codigo).first();
   if (encontrado && !encontrado.deleted_at) {
     productoExistenteDetectado = encontrado;
-    texto.innerHTML = `Este código ya pertenece a <strong>${encontrado.nombre}</strong> (Cantidad actual: <strong>${encontrado.stock_actual}</strong>).`;
+    texto.innerHTML = `Este código ya pertenece a <strong>${encontrado.nombre}</strong> (Cantidad actual: <strong>${Math.max(0, encontrado.stock_actual)}</strong>).`;
     aviso.classList.remove('hidden');
   } else {
     productoExistenteDetectado = null;
@@ -131,9 +205,8 @@ function rellenarProductoExistente() {
   document.getElementById('rep-marca').value = p.marca_compatible || '';
   document.getElementById('rep-compra').value = p.precio_compra || 0;
   document.getElementById('rep-venta').value = p.precio_venta || 0;
-  document.getElementById('rep-minimo').value = p.stock_minimo || 3;
   document.getElementById('rep-stock').value = '';
-  document.getElementById('rep-stock').placeholder = `Cantidad nueva a sumar (actual: ${p.stock_actual})`;
+  document.getElementById('rep-stock').placeholder = `Cantidad nueva a sumar (actual: ${Math.max(0, p.stock_actual)})`;
   document.getElementById('rep-stock').focus();
 
   if (p.foto) {
@@ -143,7 +216,6 @@ function rellenarProductoExistente() {
   }
 }
 
-// Comprimir imagen a tamaño ligero para celulares y base de datos
 function previsualizarFoto(event) {
   const archivo = event.target.files[0];
   if (!archivo) return;
@@ -171,13 +243,15 @@ function previsualizarFoto(event) {
 
 function limpiarFoto() {
   fotoBase64Actual = null;
-  document.getElementById('rep-foto').value = '';
-  document.getElementById('preview-foto-box').classList.add('hidden');
+  const inputFoto = document.getElementById('rep-foto');
+  if (inputFoto) inputFoto.value = '';
+  const box = document.getElementById('preview-foto-box');
+  if (box) box.classList.add('hidden');
 }
 
 function cambiarFiltroInventario(filtro, btn) {
   filtroInventarioActual = filtro;
-  document.querySelectorAll('.filtros-bar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#tab-inventario .filtros-bar button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   renderizarTodo();
 }
@@ -189,14 +263,29 @@ async function guardarRepuesto(e) {
   if (sesion.usuario.rol !== 'ADMIN') return alert('Solo el Administrador puede modificar inventario.');
 
   const ahora = new Date().toISOString();
+  const editId = document.getElementById('rep-edit-id').value;
   const codigo = document.getElementById('rep-codigo').value.trim().toUpperCase();
-  const cantidadIngresada = parseInt(document.getElementById('rep-stock').value) || 0;
+  const cantidadForm = Math.max(0, parseInt(document.getElementById('rep-stock').value) || 0);
 
-  // Buscar si el código ya existe para actualizarlo y sumar su cantidad en vez de duplicarlo
-  const existente = productoExistenteDetectado || await db.repuestos.where('codigo').equals(codigo).first();
+  let id;
+  let cantidadFinal;
+  let accionLog;
+  let fechaCreacion = ahora;
 
-  const id = existente ? existente.id : crypto.randomUUID();
-  const cantidadTotal = existente ? (existente.stock_actual + cantidadIngresada) : cantidadIngresada;
+  if (editId) {
+    // Modo Modificar Producto existente
+    const prev = await db.repuestos.get(editId);
+    id = editId;
+    cantidadFinal = cantidadForm;
+    fechaCreacion = prev?.created_at || ahora;
+    accionLog = 'MODIFICAR_PRODUCTO';
+  } else {
+    // Modo Nuevo Registro o Reingreso de código existente
+    const existente = productoExistenteDetectado || await db.repuestos.where('codigo').equals(codigo).first();
+    id = existente ? existente.id : crypto.randomUUID();
+    cantidadFinal = existente ? Math.max(0, existente.stock_actual + cantidadForm) : cantidadForm;
+    accionLog = existente ? 'REINGRESO_PRODUCTO' : 'CREAR_REPUESTO';
+  }
 
   const repuestoFinal = {
     id,
@@ -204,12 +293,12 @@ async function guardarRepuesto(e) {
     nombre: document.getElementById('rep-nombre').value.trim(),
     marca_compatible: document.getElementById('rep-marca').value.trim(),
     categoria: 'General',
-    foto: fotoBase64Actual || (existente ? existente.foto : null),
+    foto: fotoBase64Actual,
     precio_compra: parseFloat(document.getElementById('rep-compra').value) || 0,
     precio_venta: parseFloat(document.getElementById('rep-venta').value),
-    stock_actual: cantidadTotal,
-    stock_minimo: parseInt(document.getElementById('rep-minimo').value) || 3,
-    created_at: ahora,
+    stock_actual: Math.max(0, cantidadFinal),
+    stock_minimo: 3, // Alerta mínima fija en el sistema (3 unidades)
+    created_at: fechaCreacion,
     updated_at: ahora,
     updated_by: sesion.usuario.id,
     deleted_at: null,
@@ -217,7 +306,7 @@ async function guardarRepuesto(e) {
   };
 
   await db.repuestos.put(repuestoFinal);
-  await registrarAuditoria('repuestos', id, existente ? 'REINGRESO_PRODUCTO' : 'CREAR_REPUESTO', null, {
+  await registrarAuditoria('repuestos', id, accionLog, null, {
     codigo: repuestoFinal.codigo,
     nombre: repuestoFinal.nombre,
     cantidad: repuestoFinal.stock_actual,
@@ -225,11 +314,7 @@ async function guardarRepuesto(e) {
   });
 
   e.target.reset();
-  limpiarFoto();
-  productoExistenteDetectado = null;
-  document.getElementById('aviso-producto-existente').classList.add('hidden');
-  toggleFormularioProducto(false);
-
+  cerrarFormularioProducto();
   await renderizarTodo();
   sincronizarDatos();
 }
@@ -240,8 +325,8 @@ async function ajustarStockRapido(id, delta) {
   const rep = await db.repuestos.get(id);
   if (!rep) return;
 
-  const cantidadAnterior = rep.stock_actual;
-  rep.stock_actual = Math.max(0, rep.stock_actual + delta);
+  const cantidadAnterior = Math.max(0, rep.stock_actual);
+  rep.stock_actual = Math.max(0, cantidadAnterior + delta);
   rep.updated_at = new Date().toISOString();
   if (delta > 0) rep.created_at = rep.updated_at;
   rep.updated_by = sesion.usuario.id;
@@ -287,7 +372,7 @@ async function guardarGasto(e) {
   sincronizarDatos();
 }
 
-// --- PUNTO DE VENTA (POS) ---
+// --- PUNTO DE VENTA (POS) Y TABLA DE VENTAS / FIADOS ---
 function agregarAlCarrito(rep) {
   if (rep.stock_actual <= 0) return alert('Sin cantidad disponible de este producto.');
   const existente = carrito.find(i => i.repuesto.id === rep.id);
@@ -333,8 +418,15 @@ async function confirmarVenta() {
   const sesion = getSession();
   const ventaId = crypto.randomUUID();
   const ahora = new Date().toISOString();
-  const cliente = document.getElementById('venta-cliente').value.trim() || 'Mostrador';
   const metodo = document.getElementById('venta-metodo').value;
+  const clienteInput = document.getElementById('venta-cliente').value.trim();
+
+  if ((metodo === 'Fiado' || metodo === 'Credito') && !clienteInput) {
+    return alert('Escribe el nombre del cliente cuando la venta es Fiado o Crédito.');
+  }
+
+  const cliente = clienteInput || 'Mostrador';
+  const estadoVenta = metodo === 'Fiado' ? 'FIADO_PENDIENTE' : 'COMPLETADA';
 
   let total = 0;
   const detalles = [];
@@ -367,7 +459,7 @@ async function confirmarVenta() {
     cliente_nombre: cliente,
     metodo_pago: metodo,
     total,
-    estado: 'COMPLETADA',
+    estado: estadoVenta,
     created_at: ahora,
     updated_at: ahora,
     sincronizado: 0
@@ -388,6 +480,197 @@ async function confirmarVenta() {
   await renderizarTodo();
   alert('Venta guardada exitosamente.');
   sincronizarDatos();
+}
+
+function cambiarTablaVentas(tipo, btn) {
+  tablaVentasActual = tipo;
+  document.querySelectorAll('#tab-ventas .filtros-bar button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderizarTablaVentasYFiados();
+}
+
+async function marcarFiadoPagado(ventaId) {
+  const venta = await db.ventas.get(ventaId);
+  if (!venta) return;
+  if (!confirm(`¿Confirmar que ${venta.cliente_nombre} pagó $${Number(venta.total).toLocaleString('es-CO')}?`)) return;
+
+  venta.estado = 'COMPLETADA';
+  venta.updated_at = new Date().toISOString();
+  venta.sincronizado = 0;
+
+  await db.ventas.put(venta);
+  await registrarAuditoria('ventas', ventaId, 'FIADO_PAGADO', null, {
+    cliente: venta.cliente_nombre,
+    total: venta.total,
+    metodo: 'Fiado Pagado'
+  });
+
+  await renderizarTodo();
+  sincronizarDatos();
+}
+
+async function renderizarTablaVentasYFiados() {
+  const cont = document.getElementById('contenedor-tabla-ventas');
+  if (!cont) return;
+
+  const ventas = await db.ventas.orderBy('created_at').reverse().toArray();
+  const detalles = await db.detalle_ventas.toArray();
+  const repuestos = await db.repuestos.toArray();
+
+  const mapaRep = Object.fromEntries(repuestos.map(r => [r.id, r.nombre]));
+  const detallesPorVenta = {};
+  detalles.forEach(d => {
+    if (!detallesPorVenta[d.venta_id]) detallesPorVenta[d.venta_id] = [];
+    const nombreProd = mapaRep[d.repuesto_id] || 'Producto';
+    detallesPorVenta[d.venta_id].push(`${d.cantidad}x ${nombreProd}`);
+  });
+
+  if (tablaVentasActual === 'fiados') {
+    const fiados = ventas.filter(v => v.metodo_pago === 'Fiado');
+    if (fiados.length === 0) {
+      cont.innerHTML = '<p style="color:var(--muted);">No hay clientes fiados registrados.</p>';
+      return;
+    }
+
+    let html = `
+      <table class="pos-table">
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Detalle</th>
+            <th>Valor</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+    fiados.forEach(f => {
+      const fecha = new Date(f.created_at).toLocaleDateString('es-CO');
+      const itemsTxt = (detallesPorVenta[f.id] || []).join(', ') || 'Venta';
+      const pendiente = f.estado === 'FIADO_PENDIENTE';
+      const accionHtml = pendiente
+        ? `<button class="small" onclick="marcarFiadoPagado('${f.id}')">Cobrar</button>`
+        : `<span style="color:var(--primary); font-weight:bold;">Pagado</span>`;
+
+      html += `
+        <tr>
+          <td><strong>${f.cliente_nombre}</strong><br><small style="color:var(--muted);">${fecha}</small></td>
+          <td>${itemsTxt}</td>
+          <td><strong>$${Number(f.total).toLocaleString('es-CO')}</strong></td>
+          <td>${accionHtml}</td>
+        </tr>`;
+    });
+
+    html += '</tbody></table>';
+    cont.innerHTML = html;
+  } else {
+    if (ventas.length === 0) {
+      cont.innerHTML = '<p style="color:var(--muted);">No hay ventas registradas aún.</p>';
+      return;
+    }
+
+    let html = `
+      <table class="pos-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Cliente / Productos</th>
+            <th>Pago</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+    ventas.forEach(v => {
+      const fecha = new Date(v.created_at).toLocaleString('es-CO', {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+      });
+      const itemsTxt = (detallesPorVenta[v.id] || []).join(', ') || 'Venta';
+      html += `
+        <tr>
+          <td>${fecha}</td>
+          <td><strong>${v.cliente_nombre}</strong><br><small>${itemsTxt}</small></td>
+          <td>${v.metodo_pago}</td>
+          <td><strong>$${Number(v.total).toLocaleString('es-CO')}</strong></td>
+        </tr>`;
+    });
+
+    html += '</tbody></table>';
+    cont.innerHTML = html;
+  }
+}
+
+// --- EXPORTAR A EXCEL (.XLSX) ---
+async function exportarExcelCompleto() {
+  if (typeof XLSX === 'undefined') {
+    return alert('La librería de Excel aún está cargando. Verifica tu conexión la primera vez.');
+  }
+
+  const repuestos = await db.repuestos.toArray();
+  const ventas = await db.ventas.orderBy('created_at').reverse().toArray();
+  const detalles = await db.detalle_ventas.toArray();
+  const gastos = await db.gastos.orderBy('created_at').reverse().toArray();
+  const usuarios = await db.usuarios.toArray();
+
+  const mapaUsuarios = Object.fromEntries(usuarios.map(u => [u.id, u.nombre]));
+  const mapaRep = Object.fromEntries(repuestos.map(r => [r.id, r.nombre]));
+  const detallesPorVenta = {};
+  detalles.forEach(d => {
+    if (!detallesPorVenta[d.venta_id]) detallesPorVenta[d.venta_id] = [];
+    detallesPorVenta[d.venta_id].push(`${d.cantidad}x ${mapaRep[d.repuesto_id] || 'Producto'}`);
+  });
+
+  // Hoja 1: Inventario
+  const hojaInventario = repuestos.map(r => ({
+    'Código': r.codigo,
+    'Producto': r.nombre,
+    'Compatibilidad': r.marca_compatible || 'Universal',
+    'Cantidad Actual': Math.max(0, r.stock_actual),
+    'Precio Compra ($)': Number(r.precio_compra || 0),
+    'Precio Venta ($)': Number(r.precio_venta || 0),
+    'Valor Inventario Venta ($)': Math.max(0, r.stock_actual) * Number(r.precio_venta || 0),
+    'Fecha Ingreso': new Date(r.created_at || r.updated_at).toLocaleString('es-CO')
+  }));
+
+  // Hoja 2: Ventas
+  const hojaVentas = ventas.map(v => ({
+    'Fecha y Hora': new Date(v.created_at).toLocaleString('es-CO'),
+    'Cliente': v.cliente_nombre,
+    'Productos': (detallesPorVenta[v.id] || []).join(', '),
+    'Medio de Pago': v.metodo_pago,
+    'Estado': v.estado,
+    'Total ($)': Number(v.total || 0),
+    'Vendedor': mapaUsuarios[v.usuario_id] || 'Sistema'
+  }));
+
+  // Hoja 3: Clientes Fiados
+  const hojaFiados = ventas
+    .filter(v => v.metodo_pago === 'Fiado')
+    .map(f => ({
+      'Fecha': new Date(f.created_at).toLocaleString('es-CO'),
+      'Cliente': f.cliente_nombre,
+      'Productos': (detallesPorVenta[f.id] || []).join(', '),
+      'Valor ($)': Number(f.total || 0),
+      'Estado': f.estado === 'FIADO_PENDIENTE' ? 'Pendiente por cobrar' : 'Pagado'
+    }));
+
+  // Hoja 4: Gastos
+  const hojaGastos = gastos.map(g => ({
+    'Fecha': new Date(g.created_at).toLocaleString('es-CO'),
+    'Categoría': g.categoria,
+    'Descripción': g.descripcion,
+    'Método Pago': g.metodo_pago,
+    'Monto ($)': Number(g.monto || 0)
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaInventario.length ? hojaInventario : [{ Mensaje: 'Sin datos' }]), 'Inventario');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaVentas.length ? hojaVentas : [{ Mensaje: 'Sin datos' }]), 'Ventas');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaFiados.length ? hojaFiados : [{ Mensaje: 'Sin datos' }]), 'Fiados');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaGastos.length ? hojaGastos : [{ Mensaje: 'Sin datos' }]), 'Gastos');
+
+  const fechaHoy = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `Reporte_Guadanas_POS_${fechaHoy}.xlsx`);
 }
 
 // --- CREAR USUARIOS VENDEDORES (SOLO ADMIN) ---
@@ -426,18 +709,21 @@ function formatearDetalleLog(accion, det) {
   if (!det) return '';
   if (typeof det === 'string') return det;
 
-  if (accion === 'CREAR_REPUESTO' || accion === 'REINGRESO_PRODUCTO') {
+  if (accion === 'CREAR_REPUESTO' || accion === 'REINGRESO_PRODUCTO' || accion === 'MODIFICAR_PRODUCTO') {
     const cant = det.cantidad ?? det.stock ?? det.stock_actual ?? 0;
     const venta = det.venta ?? det.precio_venta ?? 0;
     return `${det.nombre || ''} (Cód: ${det.codigo || '-'}) • Cantidad: ${cant} • Venta: $${Number(venta).toLocaleString('es-CO')}`;
+  }
+  if (accion === 'ELIMINAR_PRODUCTO') {
+    return `Eliminado: ${det.nombre || ''} (Cód: ${det.codigo || '-'})`;
   }
   if (accion === 'AJUSTE_CANTIDAD' || accion === 'AJUSTE_STOCK') {
     const cant = det.cantidad ?? det.stock ?? 0;
     return `${det.nombre || 'Producto'} • Nueva cantidad: ${cant}`;
   }
-  if (accion === 'VENTA_REGISTRADA') {
+  if (accion === 'VENTA_REGISTRADA' || accion === 'FIADO_PAGADO') {
     const items = Array.isArray(det.items) ? det.items.join(', ') : '';
-    return `${items} • Total: $${Number(det.total || 0).toLocaleString('es-CO')} (${det.metodo || ''}) • Cliente: ${det.cliente || 'Mostrador'}`;
+    return `${items ? items + ' • ' : ''}Total: $${Number(det.total || 0).toLocaleString('es-CO')} (${det.metodo || ''}) • Cliente: ${det.cliente || 'Mostrador'}`;
   }
   if (accion === 'GASTO_REGISTRADO') {
     return `${det.categoria || ''}: ${det.descripcion || ''} • -$${Number(det.monto || 0).toLocaleString('es-CO')} (${det.metodo || ''})`;
@@ -455,7 +741,7 @@ async function renderizarTodo() {
 
   const repuestos = await db.repuestos.filter(r => !r.deleted_at).toArray();
 
-  // 1. Lista para VENDER (Oculta automáticamente productos con cantidad 0)
+  // 1. Lista para VENDER (Oculta productos con cantidad 0)
   const disponiblesPOS = repuestos.filter(r =>
     r.stock_actual > 0 &&
     (
@@ -486,7 +772,10 @@ async function renderizarTodo() {
       </div>`;
   });
 
-  // 2. Lista de INVENTARIO (Con filtros: Todos / Con cantidad / Agotados 0, fecha y foto)
+  // 2. Tablas de Ventas y Fiados
+  await renderizarTablaVentasYFiados();
+
+  // 3. Lista de INVENTARIO (Filtros + Editar + Eliminar + Cantidad + Fecha + Foto)
   const invFiltrados = repuestos.filter(r => {
     const coincideTexto =
       r.nombre.toLowerCase().includes(filtroInv) ||
@@ -501,12 +790,15 @@ async function renderizarTodo() {
   const invLista = document.getElementById('inventario-lista');
   invLista.innerHTML = invFiltrados.length === 0 ? '<p style="color:var(--muted);">No hay productos en esta vista.</p>' : '';
   invFiltrados.forEach(r => {
+    const cantSegura = Math.max(0, r.stock_actual);
     const fechaIngreso = new Date(r.created_at || r.updated_at).toLocaleDateString('es-CO');
     const imgHtml = r.foto ? `<img src="${r.foto}" class="prod-thumb" alt="${r.nombre}">` : '';
     const controlesAdmin = esAdmin ? `
-      <div style="margin-top:6px;">
+      <div style="display:flex; gap:4px; justify-content:flex-end; margin-top:6px; flex-wrap:wrap;">
         <button class="small secondary" onclick="ajustarStockRapido('${r.id}', -1)">-1</button>
         <button class="small" onclick="ajustarStockRapido('${r.id}', 1)">+1</button>
+        <button class="small warning" onclick="editarProductoInventario('${r.id}')">Editar</button>
+        <button class="small danger" onclick="eliminarProductoDefinitivo('${r.id}')">Eliminar</button>
       </div>` : '';
 
     invLista.innerHTML += `
@@ -521,13 +813,13 @@ async function renderizarTodo() {
           </div>
         </div>
         <div style="text-align:right; flex-shrink:0;">
-          <span class="${r.stock_actual <= r.stock_minimo ? 'stock-low' : ''}">Cantidad: ${r.stock_actual}</span>
+          <span class="${cantSegura <= r.stock_minimo ? 'stock-low' : ''}">Cantidad: ${cantSegura}</span>
           ${controlesAdmin}
         </div>
       </div>`;
   });
 
-  // 3. Lista de Gastos del Local
+  // 4. Lista de Gastos del Local
   const gastos = await db.gastos.orderBy('created_at').reverse().toArray();
   const gastosLista = document.getElementById('gastos-lista');
   const totalGastosEl = document.getElementById('total-gastos-texto');
@@ -551,7 +843,7 @@ async function renderizarTodo() {
   }
   if (totalGastosEl) totalGastosEl.textContent = `Total: $${totalGastos.toLocaleString('es-CO')}`;
 
-  // 4. Historial de Auditoría (Solo ADMIN)
+  // 5. Historial de Auditoría (Solo ADMIN)
   if (esAdmin) {
     const usuarios = await db.usuarios.toArray();
     const mapaUsuarios = Object.fromEntries(usuarios.map(u => [u.id, u.nombre]));

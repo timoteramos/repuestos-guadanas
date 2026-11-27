@@ -13,7 +13,6 @@ from auth import hash_password, verify_password, create_access_token, get_curren
 
 Base.metadata.create_all(bind=engine)
 
-# Agregar columnas nuevas (foto y created_at) en Neon sin perder registros previos
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS foto TEXT"))
     conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"))
@@ -72,7 +71,7 @@ class VentaSync(BaseModel):
     estado: str = "COMPLETADA"
     created_at: datetime
     updated_at: datetime
-    detalles: List[DetalleVentaSync]
+    detalles: List[DetalleVentaSync] = []
 
 class GastoSync(BaseModel):
     id: uuid.UUID
@@ -96,6 +95,7 @@ class AuditoriaSync(BaseModel):
 
 class PushPayload(BaseModel):
     repuestos: List[RepuestoSync] = []
+    eliminados: List[uuid.UUID] = []
     ventas: List[VentaSync] = []
     gastos: List[GastoSync] = []
     auditoria: List[AuditoriaSync] = []
@@ -164,24 +164,34 @@ def crear_usuario(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
 
 @app.post("/sync/push")
 def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 1. Eliminar definitivamente productos borrados por ADMIN
     if current_user.rol == "ADMIN":
+        for del_id in payload.eliminados:
+            rep_borrar = db.query(Repuesto).filter(Repuesto.id == del_id).first()
+            if rep_borrar:
+                db.query(DetalleVenta).filter(DetalleVenta.repuesto_id == del_id).delete()
+                db.delete(rep_borrar)
+
+        # 2. Crear o modificar productos en catálogo (nunca permitir stock negativo)
         for item in payload.repuestos:
             existente = db.query(Repuesto).filter(Repuesto.id == item.id).first()
             if not existente:
-                existente_codigo = db.query(Repuesto).filter(Repuesto.codigo == item.codigo).first()
-                if existente_codigo:
-                    existente = existente_codigo
+                existente = db.query(Repuesto).filter(Repuesto.codigo == item.codigo).first()
+
+            datos = item.model_dump()
+            datos["stock_actual"] = max(0, int(datos["stock_actual"]))
+
             if not existente:
-                datos = item.model_dump()
                 if not datos.get("created_at"):
                     datos["created_at"] = item.updated_at
                 db.add(Repuesto(**datos))
             else:
                 if item.updated_at >= existente.updated_at:
-                    for key, value in item.model_dump().items():
+                    for key, value in datos.items():
                         if key != "id":
                             setattr(existente, key, value)
 
+    # 3. Sincronizar Ventas nuevas y actualizar estado de fiados pagados
     for v in payload.ventas:
         venta_existente = db.query(Venta).filter(Venta.id == v.id).first()
         if not venta_existente:
@@ -201,14 +211,22 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
             for det in v.detalles:
                 db.add(DetalleVenta(**det.model_dump()))
                 rep = db.query(Repuesto).filter(Repuesto.id == det.repuesto_id).first()
-                if rep and v.estado == "COMPLETADA":
+                if rep:
+                    # Nunca baja de 0 aunque varios celulares vendan sin internet a la vez
                     rep.stock_actual = max(0, rep.stock_actual - det.cantidad)
                     rep.updated_at = datetime.now(timezone.utc)
+        else:
+            if v.updated_at > venta_existente.updated_at:
+                venta_existente.estado = v.estado
+                venta_existente.metodo_pago = v.metodo_pago
+                venta_existente.updated_at = v.updated_at
 
+    # 4. Sincronizar Gastos del Local
     for g in payload.gastos:
         if not db.query(Gasto).filter(Gasto.id == g.id).first():
             db.add(Gasto(**g.model_dump()))
 
+    # 5. Guardar Logs de Auditoría
     for log in payload.auditoria:
         if not db.query(AuditoriaLog).filter(AuditoriaLog.id == log.id).first():
             db.add(AuditoriaLog(**log.model_dump()))
@@ -219,19 +237,47 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
 @app.get("/sync/pull")
 def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
     query_repuestos = db.query(Repuesto)
+    query_ventas = db.query(Venta)
     query_gastos = db.query(Gasto)
     query_auditoria = db.query(AuditoriaLog)
 
     if since:
         fecha_desde = datetime.fromisoformat(since)
         query_repuestos = query_repuestos.filter(Repuesto.updated_at > fecha_desde)
+        query_ventas = query_ventas.filter(Venta.updated_at > fecha_desde)
         query_gastos = query_gastos.filter(Gasto.updated_at > fecha_desde)
         query_auditoria = query_auditoria.filter(AuditoriaLog.fecha_hora > fecha_desde)
 
     repuestos = query_repuestos.all()
+    ventas = query_ventas.order_by(Venta.created_at.desc()).limit(300).all()
     gastos = query_gastos.order_by(Gasto.created_at.desc()).all() if current_user.rol == "ADMIN" else []
     usuarios = db.query(Usuario.id, Usuario.nombre, Usuario.rol, Usuario.activo).all()
     logs = query_auditoria.order_by(AuditoriaLog.fecha_hora.desc()).limit(200).all() if current_user.rol == "ADMIN" else []
+
+    ventas_data = []
+    for v in ventas:
+        detalles = db.query(DetalleVenta).filter(DetalleVenta.venta_id == v.id).all()
+        ventas_data.append({
+            "id": str(v.id),
+            "usuario_id": str(v.usuario_id),
+            "cliente_nombre": v.cliente_nombre,
+            "metodo_pago": v.metodo_pago,
+            "total": float(v.total),
+            "estado": v.estado,
+            "created_at": v.created_at.isoformat(),
+            "updated_at": v.updated_at.isoformat(),
+            "detalles": [
+                {
+                    "id": str(d.id),
+                    "venta_id": str(d.venta_id),
+                    "repuesto_id": str(d.repuesto_id),
+                    "cantidad": d.cantidad,
+                    "precio_unitario": float(d.precio_unitario),
+                    "subtotal": float(d.subtotal)
+                }
+                for d in detalles
+            ]
+        })
 
     return {
         "server_time": datetime.now(timezone.utc).isoformat(),
@@ -246,7 +292,7 @@ def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_c
                 "foto": r.foto,
                 "precio_compra": float(r.precio_compra) if current_user.rol == "ADMIN" else 0,
                 "precio_venta": float(r.precio_venta),
-                "stock_actual": r.stock_actual,
+                "stock_actual": max(0, r.stock_actual),
                 "stock_minimo": r.stock_minimo,
                 "created_at": r.created_at.isoformat() if r.created_at else r.updated_at.isoformat(),
                 "updated_at": r.updated_at.isoformat(),
@@ -255,6 +301,7 @@ def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_c
             }
             for r in repuestos
         ],
+        "ventas": ventas_data,
         "gastos": [
             {
                 "id": str(g.id),

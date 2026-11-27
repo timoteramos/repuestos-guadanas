@@ -5,7 +5,6 @@ function getSession() {
   return data ? JSON.parse(data) : null;
 }
 
-// Registrar quién hizo qué y a qué hora en la base local
 async function registrarAuditoria(tabla, registroId, accion, anterior = null, nuevo = null) {
   const sesion = getSession();
   if (!sesion) return;
@@ -23,7 +22,6 @@ async function registrarAuditoria(tabla, registroId, accion, anterior = null, nu
   });
 }
 
-// Sincronizar cambios locales -> nube y nube -> celular
 async function sincronizarDatos() {
   const sesion = getSession();
   if (!sesion || !navigator.onLine) return;
@@ -32,8 +30,8 @@ async function sincronizarDatos() {
   if (btnSync) btnSync.textContent = 'Sincronizando...';
 
   try {
-    // 1. Buscar registros pendientes de subir (sincronizado === 0)
     const repuestosPendientes = await db.repuestos.where('sincronizado').equals(0).toArray();
+    const eliminadosPendientes = await db.repuestos_eliminados.toArray();
     const ventasPendientes = await db.ventas.where('sincronizado').equals(0).toArray();
     const gastosPendientes = await db.gastos.where('sincronizado').equals(0).toArray();
     const logsPendientes = await db.auditoria_logs.where('sincronizado').equals(0).toArray();
@@ -42,9 +40,10 @@ async function sincronizarDatos() {
       v.detalles = await db.detalle_ventas.where('venta_id').equals(v.id).toArray();
     }
 
-    // 2. PUSH: Enviar pendientes al servidor
+    // 1. PUSH
     if (
       repuestosPendientes.length > 0 ||
+      eliminadosPendientes.length > 0 ||
       ventasPendientes.length > 0 ||
       gastosPendientes.length > 0 ||
       logsPendientes.length > 0
@@ -57,6 +56,7 @@ async function sincronizarDatos() {
         },
         body: JSON.stringify({
           repuestos: repuestosPendientes,
+          eliminados: eliminadosPendientes.map(e => e.id),
           ventas: ventasPendientes,
           gastos: gastosPendientes,
           auditoria: logsPendientes
@@ -64,7 +64,12 @@ async function sincronizarDatos() {
       });
 
       if (pushRes.ok) {
-        await db.repuestos.bulkPut(repuestosPendientes.map(r => ({ ...r, sincronizado: 1 })));
+        await db.repuestos.bulkPut(repuestosPendientes.map(r => ({
+          ...r,
+          stock_actual: Math.max(0, r.stock_actual),
+          sincronizado: 1
+        })));
+        await db.repuestos_eliminados.clear();
         await db.ventas.bulkPut(ventasPendientes.map(v => {
           const { detalles, ...ventaSinDetalles } = v;
           return { ...ventaSinDetalles, sincronizado: 1 };
@@ -74,7 +79,7 @@ async function sincronizarDatos() {
       }
     }
 
-    // 3. PULL: Descargar cambios hechos por otros celulares
+    // 2. PULL
     const lastSync = localStorage.getItem('last_sync_time');
     const urlPull = lastSync ? `${API_URL}/sync/pull?since=${encodeURIComponent(lastSync)}` : `${API_URL}/sync/pull`;
 
@@ -86,7 +91,20 @@ async function sincronizarDatos() {
       const data = await pullRes.json();
       if (data.usuarios?.length) await db.usuarios.bulkPut(data.usuarios);
       if (data.repuestos?.length) {
-        await db.repuestos.bulkPut(data.repuestos.map(r => ({ ...r, sincronizado: 1 })));
+        await db.repuestos.bulkPut(data.repuestos.map(r => ({
+          ...r,
+          stock_actual: Math.max(0, r.stock_actual),
+          sincronizado: 1
+        })));
+      }
+      if (data.ventas?.length) {
+        for (const v of data.ventas) {
+          const { detalles, ...ventaBase } = v;
+          await db.ventas.put({ ...ventaBase, sincronizado: 1 });
+          if (detalles?.length) {
+            await db.detalle_ventas.bulkPut(detalles);
+          }
+        }
       }
       if (data.gastos?.length) {
         await db.gastos.bulkPut(data.gastos.map(g => ({ ...g, sincronizado: 1 })));

@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#16a34a">
   <link rel="stylesheet" href="./css/styles.css">
   <script src="https://unpkg.com/dexie@4.0.8/dist/dexie.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -55,36 +56,48 @@
             <span>Total a cobrar:</span>
             <strong id="carrito-total">$0</strong>
           </div>
-          <input type="text" id="venta-cliente" placeholder="Nombre del cliente (opcional - Mostrador)">
+          <input type="text" id="venta-cliente" placeholder="Nombre del cliente (obligatorio si es Fiado o Crédito)">
+
+          <label class="field-label" for="venta-metodo">Medios de pago</label>
           <select id="venta-metodo">
             <option value="Efectivo">Efectivo</option>
             <option value="Nequi">Nequi</option>
             <option value="Daviplata">Daviplata</option>
             <option value="Transferencia">Transferencia</option>
-            <option value="Fiado">Crédito / Fiado</option>
+            <option value="Credito">Crédito</option>
+            <option value="Fiado">Fiado</option>
           </select>
           <button onclick="confirmarVenta()">Registrar Venta</button>
+        </div>
+
+        <!-- TABLAS DE REGISTRO DE VENTAS Y CLIENTES FIADOS -->
+        <div class="card">
+          <div class="filtros-bar">
+            <button type="button" id="btn-tabla-ventas" class="active" onclick="cambiarTablaVentas('ventas', this)">Registro de Ventas</button>
+            <button type="button" id="btn-tabla-fiados" onclick="cambiarTablaVentas('fiados', this)">Clientes Fiados</button>
+          </div>
+          <div id="contenedor-tabla-ventas" class="table-responsive"></div>
         </div>
       </section>
 
       <!-- PESTAÑA 2: INVENTARIO -->
       <section id="tab-inventario" class="tab-content hidden">
-        <!-- Botón superior para desplegar el formulario -->
+        <!-- Botón superior para desplegar el formulario (oculto por defecto) -->
         <div class="admin-only" style="margin-bottom: 12px;">
-          <button id="btn-toggle-registro" onclick="toggleFormularioProducto()">+ Registrar Producto en Inventario</button>
+          <button id="btn-toggle-registro" onclick="abrirNuevoProducto()">+ Registrar Producto en Inventario</button>
         </div>
 
-        <!-- Formulario oculto por defecto -->
+        <!-- Formulario oculto al entrar -->
         <div id="card-registro-producto" class="card admin-only hidden">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <h3 style="margin:0;">Registrar Producto</h3>
-            <button type="button" class="small secondary" onclick="toggleFormularioProducto()">Cerrar</button>
+            <h3 id="titulo-form-producto" style="margin:0;">Registrar Producto</h3>
+            <button type="button" class="small secondary" onclick="cerrarFormularioProducto()">Cerrar</button>
           </div>
 
           <form id="form-producto" onsubmit="guardarRepuesto(event)">
+            <input type="hidden" id="rep-edit-id" value="">
             <input type="text" id="rep-codigo" placeholder="Código / Referencia (ej. BUJ-01)" oninput="verificarCodigoExistente()" required>
 
-            <!-- Aviso automático si el código ya existía (ej. estaba en cantidad 0) -->
             <div id="aviso-producto-existente" class="aviso-existente hidden">
               <div id="texto-producto-existente" style="margin-bottom:6px;"></div>
               <button type="button" class="small" onclick="rellenarProductoExistente()">Rellenar datos anteriores y sumar cantidad</button>
@@ -94,10 +107,9 @@
             <input type="text" id="rep-marca" placeholder="Compatible con (ej. Stihl FS120/220, Husqvarna)">
             <input type="number" id="rep-compra" placeholder="Precio de compra (Costo)" required>
             <input type="number" id="rep-venta" placeholder="Precio de venta al público" required>
-            <input type="number" id="rep-stock" placeholder="Cantidad a ingresar" min="1" required>
-            <input type="number" id="rep-minimo" placeholder="Alerta cantidad mínima (ej. 3)" value="3">
+            <input type="number" id="rep-stock" placeholder="Cantidad" min="0" required>
 
-            <label style="display:block; font-size:13px; color:var(--muted); margin-bottom:4px;">Foto del producto (opcional)</label>
+            <label class="field-label" for="rep-foto">Foto del producto (opcional)</label>
             <input type="file" id="rep-foto" accept="image/*" capture="environment" onchange="previsualizarFoto(event)">
             <div id="preview-foto-box" class="hidden" style="margin-bottom:10px; text-align:center;">
               <img id="preview-foto-img" src="" alt="Vista previa" style="max-height:110px; border-radius:8px; border:1px solid var(--border);">
@@ -105,7 +117,7 @@
               <button type="button" class="small danger" style="margin-top:4px;" onclick="limpiarFoto()">Quitar foto</button>
             </div>
 
-            <button type="submit">Guardar en Inventario</button>
+            <button type="submit" id="btn-submit-producto">Guardar en Inventario</button>
           </form>
         </div>
 
@@ -153,8 +165,18 @@
         </div>
       </section>
 
-      <!-- PESTAÑA 4: AUDITORÍA Y USUARIOS -->
+      <!-- PESTAÑA 4: CUENTA (Sin "Logs" en el nombre, Cerrar Sesión arriba y Excel) -->
       <section id="tab-admin" class="tab-content hidden">
+        <div class="card">
+          <button class="danger" style="margin-bottom:0;" onclick="cerrarSesion()">Cerrar Sesión</button>
+        </div>
+
+        <div class="card admin-only">
+          <h3 style="margin-top:0;">Exportar Reporte Completo</h3>
+          <p style="font-size:13px; color:var(--muted); margin-top:0;">Descarga un archivo de Excel (.xlsx) organizado por hojas con el Inventario, Ventas, Fiados y Gastos.</p>
+          <button style="margin-bottom:0;" onclick="exportarExcelCompleto()">Descargar Hoja de Excel (.xlsx)</button>
+        </div>
+
         <div class="card admin-only">
           <h3 style="margin-top:0;">Crear Cuenta de Empleado</h3>
           <form onsubmit="crearNuevoUsuario(event)">
@@ -173,10 +195,6 @@
           <h3 style="margin-top:0;">Auditoría de Cambios (Quién y Cuándo)</h3>
           <div id="auditoria-lista"></div>
         </div>
-
-        <div class="card">
-          <button class="danger" onclick="cerrarSesion()">Cerrar Sesión</button>
-        </div>
       </section>
     </main>
 
@@ -185,7 +203,7 @@
       <button class="active" onclick="mostrarTab('tab-ventas', this)">Vender</button>
       <button onclick="mostrarTab('tab-inventario', this)">Inventario</button>
       <button onclick="mostrarTab('tab-gastos', this)">Gastos</button>
-      <button onclick="mostrarTab('tab-admin', this)">Cuenta / Logs</button>
+      <button onclick="mostrarTab('tab-admin', this)">Cuenta</button>
     </nav>
   </div>
 
