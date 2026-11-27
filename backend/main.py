@@ -13,9 +13,20 @@ from auth import hash_password, verify_password, create_access_token, get_curren
 
 Base.metadata.create_all(bind=engine)
 
+# Migración segura en Neon: agrega negocio_id y asigna tus registros previos a tu negocio principal
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS foto TEXT"))
     conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"))
+    for tabla in ["usuarios", "repuestos", "ventas", "gastos", "auditoria_logs"]:
+        conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS negocio_id UUID"))
+    conn.execute(text("ALTER TABLE repuestos DROP CONSTRAINT IF EXISTS repuestos_codigo_key"))
+
+    # Vincular datos existentes sin negocio_id al primer admin registrado
+    primer_admin = conn.execute(text("SELECT id, negocio_id FROM usuarios ORDER BY updated_at ASC LIMIT 1")).fetchone()
+    if primer_admin:
+        neg_id = primer_admin.negocio_id or primer_admin.id
+        for tabla in ["usuarios", "repuestos", "ventas", "gastos", "auditoria_logs"]:
+            conn.execute(text(f"UPDATE {tabla} SET negocio_id = :neg WHERE negocio_id IS NULL"), {"neg": neg_id})
 
 app = FastAPI(title="API Repuestos de Guadañas Offline-First")
 
@@ -29,6 +40,11 @@ app.add_middleware(
 
 # --- ESQUEMAS DE DATOS ---
 class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class RegistroPublicoRequest(BaseModel):
+    nombre: str
     email: str
     password: str
 
@@ -100,18 +116,28 @@ class PushPayload(BaseModel):
     gastos: List[GastoSync] = []
     auditoria: List[AuditoriaSync] = []
 
+def obtener_negocio_id(user: Usuario, db: Session) -> uuid.UUID:
+    if not user.negocio_id:
+        user.negocio_id = user.id
+        db.commit()
+    return user.negocio_id
+
 # --- ENDPOINTS DE AUTENTICACIÓN ---
 
-@app.post("/setup-admin")
-def crear_primer_admin(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
-    existe = db.query(Usuario).first()
-    if existe:
-        raise HTTPException(status_code=400, detail="Ya existe un administrador. Inicia sesión para crear más usuarios.")
-    
+@app.post("/auth/register")
+def registrar_cuenta_nueva(data: RegistroPublicoRequest, db: Session = Depends(get_db)):
+    """Crea una cuenta nueva de Administrador con su propio espacio de datos aislado."""
+    email_limpio = data.email.lower().strip()
+    if db.query(Usuario).filter(Usuario.email == email_limpio).first():
+        raise HTTPException(status_code=400, detail="Ese correo ya está registrado. Inicia sesión.")
+
+    nuevo_id = uuid.uuid4()
+    negocio_id = uuid.uuid4()
     nuevo = Usuario(
-        id=uuid.uuid4(),
-        nombre=data.nombre,
-        email=data.email.lower().strip(),
+        id=nuevo_id,
+        negocio_id=negocio_id,
+        nombre=data.nombre.strip(),
+        email=email_limpio,
         password_hash=hash_password(data.password),
         rol="ADMIN",
         activo=True,
@@ -119,7 +145,18 @@ def crear_primer_admin(data: CrearUsuarioRequest, db: Session = Depends(get_db))
     )
     db.add(nuevo)
     db.commit()
-    return {"mensaje": "Administrador principal creado con éxito", "id": str(nuevo.id)}
+
+    token = create_access_token({"sub": str(nuevo.id), "rol": nuevo.rol})
+    return {
+        "access_token": token,
+        "usuario": {
+            "id": str(nuevo.id),
+            "negocio_id": str(negocio_id),
+            "nombre": nuevo.nombre,
+            "email": nuevo.email,
+            "rol": nuevo.rol
+        }
+    }
 
 @app.post("/auth/login")
 def login(data: LoginRequest, db: Session = Depends(get_db)):
@@ -129,11 +166,13 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     if not user.activo:
         raise HTTPException(status_code=403, detail="Usuario desactivado")
 
+    negocio_id = obtener_negocio_id(user, db)
     token = create_access_token({"sub": str(user.id), "rol": user.rol})
     return {
         "access_token": token,
         "usuario": {
             "id": str(user.id),
+            "negocio_id": str(negocio_id),
             "nombre": user.nombre,
             "email": user.email,
             "rol": user.rol
@@ -141,15 +180,18 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     }
 
 @app.post("/usuarios", dependencies=[Depends(require_admin)])
-def crear_usuario(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
+def crear_usuario(data: CrearUsuarioRequest, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Invita a otro Administrador o Vendedor al mismo negocio para compartir datos."""
     if data.rol not in ["ADMIN", "VENDEDOR"]:
         raise HTTPException(status_code=400, detail="Rol debe ser ADMIN o VENDEDOR")
     if db.query(Usuario).filter(Usuario.email == data.email.lower().strip()).first():
         raise HTTPException(status_code=400, detail="Ese correo ya está registrado")
 
+    negocio_id = obtener_negocio_id(current_user, db)
     nuevo = Usuario(
         id=uuid.uuid4(),
-        nombre=data.nombre,
+        negocio_id=negocio_id,
+        nombre=data.nombre.strip(),
         email=data.email.lower().strip(),
         password_hash=hash_password(data.password),
         rol=data.rol,
@@ -158,28 +200,29 @@ def crear_usuario(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
     )
     db.add(nuevo)
     db.commit()
-    return {"mensaje": f"Usuario {nuevo.nombre} creado", "id": str(nuevo.id)}
+    return {"mensaje": f"Usuario {nuevo.nombre} ({nuevo.rol}) agregado a tu equipo", "id": str(nuevo.id)}
 
-# --- ENDPOINTS DE SINCRONIZACIÓN OFFLINE-FIRST ---
+# --- ENDPOINTS DE SINCRONIZACIÓN AISLADA POR NEGOCIO ---
 
 @app.post("/sync/push")
 def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    # 1. Eliminar definitivamente productos borrados por ADMIN
+    negocio_id = obtener_negocio_id(current_user, db)
+
     if current_user.rol == "ADMIN":
         for del_id in payload.eliminados:
-            rep_borrar = db.query(Repuesto).filter(Repuesto.id == del_id).first()
+            rep_borrar = db.query(Repuesto).filter(Repuesto.id == del_id, Repuesto.negocio_id == negocio_id).first()
             if rep_borrar:
                 db.query(DetalleVenta).filter(DetalleVenta.repuesto_id == del_id).delete()
                 db.delete(rep_borrar)
 
-        # 2. Crear o modificar productos en catálogo (nunca permitir stock negativo)
         for item in payload.repuestos:
-            existente = db.query(Repuesto).filter(Repuesto.id == item.id).first()
+            existente = db.query(Repuesto).filter(Repuesto.id == item.id, Repuesto.negocio_id == negocio_id).first()
             if not existente:
-                existente = db.query(Repuesto).filter(Repuesto.codigo == item.codigo).first()
+                existente = db.query(Repuesto).filter(Repuesto.codigo == item.codigo, Repuesto.negocio_id == negocio_id).first()
 
             datos = item.model_dump()
             datos["stock_actual"] = max(0, int(datos["stock_actual"]))
+            datos["negocio_id"] = negocio_id
 
             if not existente:
                 if not datos.get("created_at"):
@@ -191,12 +234,12 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
                         if key != "id":
                             setattr(existente, key, value)
 
-    # 3. Sincronizar Ventas nuevas y actualizar estado de fiados pagados
     for v in payload.ventas:
-        venta_existente = db.query(Venta).filter(Venta.id == v.id).first()
+        venta_existente = db.query(Venta).filter(Venta.id == v.id, Venta.negocio_id == negocio_id).first()
         if not venta_existente:
             nueva_venta = Venta(
                 id=v.id,
+                negocio_id=negocio_id,
                 usuario_id=v.usuario_id,
                 cliente_nombre=v.cliente_nombre,
                 metodo_pago=v.metodo_pago,
@@ -210,9 +253,8 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
 
             for det in v.detalles:
                 db.add(DetalleVenta(**det.model_dump()))
-                rep = db.query(Repuesto).filter(Repuesto.id == det.repuesto_id).first()
+                rep = db.query(Repuesto).filter(Repuesto.id == det.repuesto_id, Repuesto.negocio_id == negocio_id).first()
                 if rep:
-                    # Nunca baja de 0 aunque varios celulares vendan sin internet a la vez
                     rep.stock_actual = max(0, rep.stock_actual - det.cantidad)
                     rep.updated_at = datetime.now(timezone.utc)
         else:
@@ -221,25 +263,29 @@ def sync_push(payload: PushPayload, current_user: Usuario = Depends(get_current_
                 venta_existente.metodo_pago = v.metodo_pago
                 venta_existente.updated_at = v.updated_at
 
-    # 4. Sincronizar Gastos del Local
     for g in payload.gastos:
-        if not db.query(Gasto).filter(Gasto.id == g.id).first():
-            db.add(Gasto(**g.model_dump()))
+        if not db.query(Gasto).filter(Gasto.id == g.id, Gasto.negocio_id == negocio_id).first():
+            datos_gasto = g.model_dump()
+            datos_gasto["negocio_id"] = negocio_id
+            db.add(Gasto(**datos_gasto))
 
-    # 5. Guardar Logs de Auditoría
     for log in payload.auditoria:
-        if not db.query(AuditoriaLog).filter(AuditoriaLog.id == log.id).first():
-            db.add(AuditoriaLog(**log.model_dump()))
+        if not db.query(AuditoriaLog).filter(AuditoriaLog.id == log.id, AuditoriaLog.negocio_id == negocio_id).first():
+            datos_log = log.model_dump()
+            datos_log["negocio_id"] = negocio_id
+            db.add(AuditoriaLog(**datos_log))
 
     db.commit()
     return {"status": "ok", "server_time": datetime.now(timezone.utc).isoformat()}
 
 @app.get("/sync/pull")
 def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    query_repuestos = db.query(Repuesto)
-    query_ventas = db.query(Venta)
-    query_gastos = db.query(Gasto)
-    query_auditoria = db.query(AuditoriaLog)
+    negocio_id = obtener_negocio_id(current_user, db)
+
+    query_repuestos = db.query(Repuesto).filter(Repuesto.negocio_id == negocio_id)
+    query_ventas = db.query(Venta).filter(Venta.negocio_id == negocio_id)
+    query_gastos = db.query(Gasto).filter(Gasto.negocio_id == negocio_id)
+    query_auditoria = db.query(AuditoriaLog).filter(AuditoriaLog.negocio_id == negocio_id)
 
     if since:
         fecha_desde = datetime.fromisoformat(since)
@@ -249,9 +295,9 @@ def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_c
         query_auditoria = query_auditoria.filter(AuditoriaLog.fecha_hora > fecha_desde)
 
     repuestos = query_repuestos.all()
-    ventas = query_ventas.order_by(Venta.created_at.desc()).limit(300).all()
+    ventas = query_ventas.order_by(Venta.created_at.desc()).limit(500).all()
     gastos = query_gastos.order_by(Gasto.created_at.desc()).all() if current_user.rol == "ADMIN" else []
-    usuarios = db.query(Usuario.id, Usuario.nombre, Usuario.rol, Usuario.activo).all()
+    usuarios = db.query(Usuario.id, Usuario.nombre, Usuario.rol, Usuario.activo).filter(Usuario.negocio_id == negocio_id).all()
     logs = query_auditoria.order_by(AuditoriaLog.fecha_hora.desc()).limit(200).all() if current_user.rol == "ADMIN" else []
 
     ventas_data = []

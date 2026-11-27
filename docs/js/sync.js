@@ -40,7 +40,6 @@ async function sincronizarDatos() {
       v.detalles = await db.detalle_ventas.where('venta_id').equals(v.id).toArray();
     }
 
-    // 1. PUSH
     if (
       repuestosPendientes.length > 0 ||
       eliminadosPendientes.length > 0 ||
@@ -79,7 +78,6 @@ async function sincronizarDatos() {
       }
     }
 
-    // 2. PULL
     const lastSync = localStorage.getItem('last_sync_time');
     const urlPull = lastSync ? `${API_URL}/sync/pull?since=${encodeURIComponent(lastSync)}` : `${API_URL}/sync/pull`;
 

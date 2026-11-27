@@ -12,17 +12,33 @@
 </head>
 <body>
 
-  <!-- PANTALLA DE LOGIN -->
-  <div id="view-login" class="container" style="margin-top: 40px;">
-    <div class="card">
+  <!-- PANTALLA DE LOGIN Y CREACIÓN DE CUENTA NUEVA -->
+  <div id="view-login" class="container" style="margin-top: 32px;">
+    <div id="box-login" class="card">
       <h2 style="margin-top:0;">Repuestos Guadañas</h2>
-      <p style="color:var(--muted); font-size:14px;">Inicia sesión con tu cuenta autorizada para operar offline u online.</p>
+      <p style="color:var(--muted); font-size:14px;">Inicia sesión con tu cuenta para gestionar tu inventario y ventas en línea o sin internet.</p>
       <form onsubmit="iniciarSesion(event)">
         <input type="email" id="login-email" placeholder="Correo electrónico" required>
         <input type="password" id="login-pass" placeholder="Contraseña" required>
         <button type="submit">Entrar al Sistema</button>
       </form>
       <p id="login-error" style="color:var(--danger); font-size:14px;"></p>
+      <hr style="border:none; border-top:1px solid var(--border); margin:14px 0;">
+      <p style="font-size:13px; color:var(--muted); margin-bottom:8px;">¿Eres nuevo y quieres tu propio espacio privado?</p>
+      <button type="button" class="secondary" style="margin-bottom:0;" onclick="mostrarFormularioRegistroPublico(true)">Crear Cuenta de Administrador</button>
+    </div>
+
+    <div id="box-register" class="card hidden">
+      <h2 style="margin-top:0;">Crear Cuenta Nueva</h2>
+      <p style="color:var(--muted); font-size:13px;">Tu cuenta tendrá su propio inventario, ventas y gastos totalmente independientes y privados.</p>
+      <form onsubmit="registrarCuentaNueva(event)">
+        <input type="text" id="reg-nombre" placeholder="Tu nombre o nombre del local" required>
+        <input type="email" id="reg-email" placeholder="Correo electrónico" required>
+        <input type="password" id="reg-pass" placeholder="Crea una contraseña" minlength="4" required>
+        <button type="submit">Crear mi Cuenta y Entrar</button>
+      </form>
+      <p id="reg-error" style="color:var(--danger); font-size:14px;"></p>
+      <button type="button" class="secondary" style="margin-bottom:0;" onclick="mostrarFormularioRegistroPublico(false)">Ya tengo cuenta — Volver a Iniciar Sesión</button>
     </div>
   </div>
 
@@ -40,8 +56,36 @@
     </header>
 
     <main class="container">
-      <!-- PESTAÑA 1: PUNTO DE VENTA (POS) -->
-      <section id="tab-ventas" class="tab-content">
+      <!-- PESTAÑA 1: INICIO (DASHBOARD) -->
+      <section id="tab-inicio" class="tab-content">
+        <div class="welcome-banner">
+          <h2 id="inicio-saludo" style="margin:0 0 6px 0; font-size:20px;">¡Bienvenido a tu sistema de gestión!</h2>
+          <p style="margin:0; font-size:13.5px; color:#cbd5e1; line-height:1.45;">
+            Aquí tienes el resumen en tiempo real de tu negocio. Controla tus ventas diarias, revisa el rendimiento de toda la semana y mantente al tanto de los repuestos que están próximos a agotarse para surtir a tiempo.
+          </p>
+        </div>
+
+        <div class="card kpi-card">
+          <small style="color:var(--muted); font-weight:600; text-transform:uppercase;">Total vendido hoy</small>
+          <div id="inicio-total-hoy" style="font-size:28px; font-weight:800; color:var(--primary); margin-top:4px;">$0</div>
+          <small id="inicio-cantidad-ventas-hoy" style="color:var(--muted);">0 ventas registradas hoy</small>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0; margin-bottom:4px;">Ventas de la Semana (Últimos 7 días)</h3>
+          <small style="color:var(--muted);">Comparativo diario de ingresos en pesos</small>
+          <div id="inicio-grafica-semana" class="chart-bars"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0; margin-bottom:6px;">Productos con Pocas Unidades</h3>
+          <small style="color:var(--muted); display:block; margin-bottom:10px;">Repuestos con 3 unidades o menos en inventario</small>
+          <div id="inicio-pocos-productos"></div>
+        </div>
+      </section>
+
+      <!-- PESTAÑA 2: PUNTO DE VENTA (POS) -->
+      <section id="tab-ventas" class="tab-content hidden">
         <div class="card">
           <h3 style="margin-top:0;">Nueva Venta</h3>
           <input type="text" id="buscador-repuestos" placeholder="Buscar por nombre, código o marca..." oninput="renderizarTodo()">
@@ -70,24 +114,28 @@
           <button onclick="confirmarVenta()">Registrar Venta</button>
         </div>
 
-        <!-- TABLAS DE REGISTRO DE VENTAS Y CLIENTES FIADOS -->
+        <!-- TABLAS DE REGISTRO DE VENTAS (CON FILTRO POR FECHA) Y CLIENTES FIADOS -->
         <div class="card">
           <div class="filtros-bar">
             <button type="button" id="btn-tabla-ventas" class="active" onclick="cambiarTablaVentas('ventas', this)">Registro de Ventas</button>
             <button type="button" id="btn-tabla-fiados" onclick="cambiarTablaVentas('fiados', this)">Clientes Fiados</button>
           </div>
+
+          <div id="filtro-fecha-ventas-box" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+            <input type="date" id="filtro-fecha-ventas" style="margin-bottom:0; flex:1;" onchange="renderizarTablaVentasYFiados()">
+            <button type="button" class="small secondary" onclick="limpiarFiltroFechaVentas()">Ver todas</button>
+          </div>
+
           <div id="contenedor-tabla-ventas" class="table-responsive"></div>
         </div>
       </section>
 
-      <!-- PESTAÑA 2: INVENTARIO -->
+      <!-- PESTAÑA 3: INVENTARIO -->
       <section id="tab-inventario" class="tab-content hidden">
-        <!-- Botón superior para desplegar el formulario (oculto por defecto) -->
         <div class="admin-only" style="margin-bottom: 12px;">
           <button id="btn-toggle-registro" onclick="abrirNuevoProducto()">+ Registrar Producto en Inventario</button>
         </div>
 
-        <!-- Formulario oculto al entrar -->
         <div id="card-registro-producto" class="card admin-only hidden">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h3 id="titulo-form-producto" style="margin:0;">Registrar Producto</h3>
@@ -133,7 +181,7 @@
         </div>
       </section>
 
-      <!-- PESTAÑA 3: GASTOS DEL LOCAL -->
+      <!-- PESTAÑA 4: GASTOS DEL LOCAL -->
       <section id="tab-gastos" class="tab-content hidden">
         <div class="card">
           <h3 style="margin-top:0;">Registrar Gasto del Local</h3>
@@ -165,7 +213,7 @@
         </div>
       </section>
 
-      <!-- PESTAÑA 4: CUENTA (Sin "Logs" en el nombre, Cerrar Sesión arriba y Excel) -->
+      <!-- PESTAÑA 5: CUENTA -->
       <section id="tab-admin" class="tab-content hidden">
         <div class="card">
           <button class="danger" style="margin-bottom:0;" onclick="cerrarSesion()">Cerrar Sesión</button>
@@ -173,21 +221,30 @@
 
         <div class="card admin-only">
           <h3 style="margin-top:0;">Exportar Reporte Completo</h3>
-          <p style="font-size:13px; color:var(--muted); margin-top:0;">Descarga un archivo de Excel (.xlsx) organizado por hojas con el Inventario, Ventas, Fiados y Gastos.</p>
+          <p style="font-size:13px; color:var(--muted); margin-top:0;">Descarga un archivo de Excel (.xlsx) organizado por hojas con el Inventario, Ventas, Fiados y Gastos de tu cuenta.</p>
           <button style="margin-bottom:0;" onclick="exportarExcelCompleto()">Descargar Hoja de Excel (.xlsx)</button>
         </div>
 
-        <div class="card admin-only">
-          <h3 style="margin-top:0;">Crear Cuenta de Empleado</h3>
+        <!-- Botón desplegable para invitar Administrador o Vendedor -->
+        <div class="admin-only" style="margin-bottom: 14px;">
+          <button id="btn-toggle-empleado" class="secondary" style="margin-bottom:0;" onclick="toggleFormularioEmpleado()">+ Invitar / Crear Cuenta de Equipo (Admin o Vendedor)</button>
+        </div>
+
+        <div id="card-crear-empleado" class="card admin-only hidden">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="margin:0;">Invitar a tu Equipo</h3>
+            <button type="button" class="small secondary" onclick="toggleFormularioEmpleado(false)">Cerrar</button>
+          </div>
+          <p style="font-size:12.5px; color:var(--muted); margin-top:0;">Las personas que agregues aquí compartirán exactamente tu mismo inventario, ventas y gastos.</p>
           <form onsubmit="crearNuevoUsuario(event)">
-            <input type="text" id="usr-nombre" placeholder="Nombre del empleado" required>
+            <input type="text" id="usr-nombre" placeholder="Nombre de la persona" required>
             <input type="email" id="usr-email" placeholder="Correo electrónico" required>
-            <input type="password" id="usr-pass" placeholder="Contraseña" required>
+            <input type="password" id="usr-pass" placeholder="Contraseña de acceso" required>
             <select id="usr-rol">
-              <option value="VENDEDOR">Vendedor (Solo ventas y consulta)</option>
-              <option value="ADMIN">Administrador (Acceso total)</option>
+              <option value="ADMIN">Administrador (Comparte y puede editar todo)</option>
+              <option value="VENDEDOR">Vendedor (Solo registra ventas y consulta)</option>
             </select>
-            <button type="submit">Registrar Usuario</button>
+            <button type="submit">Registrar en mi Equipo</button>
           </form>
         </div>
 
@@ -198,9 +255,10 @@
       </section>
     </main>
 
-    <!-- BARRA INFERIOR DE NAVEGACIÓN -->
+    <!-- BARRA INFERIOR DE NAVEGACIÓN (5 PESTAÑAS) -->
     <nav class="bottom-nav">
-      <button class="active" onclick="mostrarTab('tab-ventas', this)">Vender</button>
+      <button class="active" onclick="mostrarTab('tab-inicio', this)">Inicio</button>
+      <button onclick="mostrarTab('tab-ventas', this)">Vender</button>
       <button onclick="mostrarTab('tab-inventario', this)">Inventario</button>
       <button onclick="mostrarTab('tab-gastos', this)">Gastos</button>
       <button onclick="mostrarTab('tab-admin', this)">Cuenta</button>

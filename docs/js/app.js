@@ -32,7 +32,51 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// --- AUTENTICACIÓN ---
+// --- AUTENTICACIÓN Y REGISTRO DE CUENTA NUEVA ---
+function mostrarFormularioRegistroPublico(mostrar) {
+  document.getElementById('login-error').textContent = '';
+  document.getElementById('reg-error').textContent = '';
+  if (mostrar) {
+    document.getElementById('box-login').classList.add('hidden');
+    document.getElementById('box-register').classList.remove('hidden');
+  } else {
+    document.getElementById('box-register').classList.add('hidden');
+    document.getElementById('box-login').classList.remove('hidden');
+  }
+}
+
+async function registrarCuentaNueva(e) {
+  e.preventDefault();
+  if (!navigator.onLine) {
+    document.getElementById('reg-error').textContent = 'Necesitas conexión a internet para crear tu cuenta por primera vez.';
+    return;
+  }
+
+  const nombre = document.getElementById('reg-nombre').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-pass').value;
+  const errorEl = document.getElementById('reg-error');
+  errorEl.textContent = '';
+
+  try {
+    const res = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombre, email, password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'No se pudo crear la cuenta');
+
+    await limpiarBaseLocalPorCambioCuenta();
+    localStorage.setItem('sesion_guadanas', JSON.stringify(data));
+    iniciarInterfaz(data);
+    await sincronizarDatos();
+    await renderizarTodo();
+  } catch (err) {
+    errorEl.textContent = err.message;
+  }
+}
+
 async function iniciarSesion(e) {
   e.preventDefault();
   const email = document.getElementById('login-email').value.trim();
@@ -49,6 +93,12 @@ async function iniciarSesion(e) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Error al iniciar sesión');
 
+    // Si inicia sesión una cuenta de otro negocio, limpiar IndexedDB local para garantizar privacidad total
+    const sesionPrevia = getSession();
+    if (!sesionPrevia || sesionPrevia.usuario?.negocio_id !== data.usuario?.negocio_id) {
+      await limpiarBaseLocalPorCambioCuenta();
+    }
+
     localStorage.setItem('sesion_guadanas', JSON.stringify(data));
     iniciarInterfaz(data);
     await sincronizarDatos();
@@ -58,8 +108,9 @@ async function iniciarSesion(e) {
   }
 }
 
-function cerrarSesion() {
+async function cerrarSesion() {
   if (confirm('¿Seguro que deseas cerrar sesión?')) {
+    await limpiarBaseLocalPorCambioCuenta();
     localStorage.removeItem('sesion_guadanas');
     location.reload();
   }
@@ -70,15 +121,20 @@ function iniciarInterfaz(sesion) {
   document.getElementById('app-shell').classList.remove('hidden');
   document.getElementById('user-info').textContent = `${sesion.usuario.nombre} (${sesion.usuario.rol})`;
 
+  const saludoEl = document.getElementById('inicio-saludo');
+  if (saludoEl) {
+    saludoEl.textContent = `¡Bienvenido, ${sesion.usuario.nombre}!`;
+  }
+
   const soloAdmin = document.querySelectorAll('.admin-only');
   soloAdmin.forEach(el => {
     if (sesion.usuario.rol === 'ADMIN') el.classList.remove('hidden');
     else el.classList.add('hidden');
   });
 
-  // Asegurar que el formulario de producto siempre arranque oculto al entrar
-  const cardReg = document.getElementById('card-registro-producto');
-  if (cardReg) cardReg.classList.add('hidden');
+  // Mantener formularios cerrados por defecto al entrar
+  cerrarFormularioProducto();
+  toggleFormularioEmpleado(false);
 }
 
 function mostrarTab(tabId, btn) {
@@ -87,12 +143,29 @@ function mostrarTab(tabId, btn) {
   document.querySelectorAll('.bottom-nav button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
 
-  if (tabId === 'tab-inventario') {
-    cerrarFormularioProducto();
+  if (tabId === 'tab-inventario') cerrarFormularioProducto();
+  if (tabId === 'tab-admin') toggleFormularioEmpleado(false);
+}
+
+// --- FORMULARIO DESPLEGABLE DE EMPLEADO ---
+function toggleFormularioEmpleado(forzar = null) {
+  const card = document.getElementById('card-crear-empleado');
+  const btn = document.getElementById('btn-toggle-empleado');
+  if (!card || !btn) return;
+  const esAdmin = getSession()?.usuario?.rol === 'ADMIN';
+  if (!esAdmin) return;
+
+  const abrir = forzar !== null ? forzar : card.classList.contains('hidden');
+  if (abrir) {
+    card.classList.remove('hidden');
+    btn.classList.add('hidden');
+  } else {
+    card.classList.add('hidden');
+    btn.classList.remove('hidden');
   }
 }
 
-// --- FORMULARIO DESPLEGABLE, EDITAR, ELIMINAR Y AUTO-RELLENO ---
+// --- FORMULARIO DESPLEGABLE, EDITAR, ELIMINAR Y AUTO-RELLENO DE PRODUCTO ---
 function abrirNuevoProducto() {
   document.getElementById('form-producto').reset();
   document.getElementById('rep-edit-id').value = '';
@@ -112,9 +185,11 @@ function cerrarFormularioProducto() {
   const btn = document.getElementById('btn-toggle-registro');
   if (card) card.classList.add('hidden');
   if (btn && getSession()?.usuario?.rol === 'ADMIN') btn.classList.remove('hidden');
-  document.getElementById('rep-edit-id').value = '';
+  const editEl = document.getElementById('rep-edit-id');
+  if (editEl) editEl.value = '';
   productoExistenteDetectado = null;
-  document.getElementById('aviso-producto-existente').classList.add('hidden');
+  const aviso = document.getElementById('aviso-producto-existente');
+  if (aviso) aviso.classList.add('hidden');
   limpiarFoto();
 }
 
@@ -173,7 +248,6 @@ async function eliminarProductoDefinitivo(id) {
 }
 
 async function verificarCodigoExistente() {
-  // Si está editando un producto existente, no mostrar el aviso de duplicado
   if (document.getElementById('rep-edit-id').value) return;
 
   const codigo = document.getElementById('rep-codigo').value.trim().toUpperCase();
@@ -273,14 +347,12 @@ async function guardarRepuesto(e) {
   let fechaCreacion = ahora;
 
   if (editId) {
-    // Modo Modificar Producto existente
     const prev = await db.repuestos.get(editId);
     id = editId;
     cantidadFinal = cantidadForm;
     fechaCreacion = prev?.created_at || ahora;
     accionLog = 'MODIFICAR_PRODUCTO';
   } else {
-    // Modo Nuevo Registro o Reingreso de código existente
     const existente = productoExistenteDetectado || await db.repuestos.where('codigo').equals(codigo).first();
     id = existente ? existente.id : crypto.randomUUID();
     cantidadFinal = existente ? Math.max(0, existente.stock_actual + cantidadForm) : cantidadForm;
@@ -297,7 +369,7 @@ async function guardarRepuesto(e) {
     precio_compra: parseFloat(document.getElementById('rep-compra').value) || 0,
     precio_venta: parseFloat(document.getElementById('rep-venta').value),
     stock_actual: Math.max(0, cantidadFinal),
-    stock_minimo: 3, // Alerta mínima fija en el sistema (3 unidades)
+    stock_minimo: 3,
     created_at: fechaCreacion,
     updated_at: ahora,
     updated_by: sesion.usuario.id,
@@ -486,7 +558,27 @@ function cambiarTablaVentas(tipo, btn) {
   tablaVentasActual = tipo;
   document.querySelectorAll('#tab-ventas .filtros-bar button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+
+  const filtroFechaBox = document.getElementById('filtro-fecha-ventas-box');
+  if (filtroFechaBox) {
+    if (tipo === 'ventas') filtroFechaBox.classList.remove('hidden');
+    else filtroFechaBox.classList.add('hidden');
+  }
   renderizarTablaVentasYFiados();
+}
+
+function limpiarFiltroFechaVentas() {
+  const input = document.getElementById('filtro-fecha-ventas');
+  if (input) input.value = '';
+  renderizarTablaVentasYFiados();
+}
+
+function obtenerFechaLocalYYYYMMDD(isoString) {
+  const d = new Date(isoString);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 async function marcarFiadoPagado(ventaId) {
@@ -564,8 +656,13 @@ async function renderizarTablaVentasYFiados() {
     html += '</tbody></table>';
     cont.innerHTML = html;
   } else {
-    if (ventas.length === 0) {
-      cont.innerHTML = '<p style="color:var(--muted);">No hay ventas registradas aún.</p>';
+    const fechaSeleccionada = document.getElementById('filtro-fecha-ventas')?.value || '';
+    const ventasFiltradas = fechaSeleccionada
+      ? ventas.filter(v => obtenerFechaLocalYYYYMMDD(v.created_at) === fechaSeleccionada)
+      : ventas;
+
+    if (ventasFiltradas.length === 0) {
+      cont.innerHTML = `<p style="color:var(--muted);">${fechaSeleccionada ? 'No hubo ventas registradas en la fecha seleccionada.' : 'No hay ventas registradas aún.'}</p>`;
       return;
     }
 
@@ -581,7 +678,7 @@ async function renderizarTablaVentasYFiados() {
         </thead>
         <tbody>`;
 
-    ventas.forEach(v => {
+    ventasFiltradas.forEach(v => {
       const fecha = new Date(v.created_at).toLocaleString('es-CO', {
         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
       });
@@ -597,6 +694,82 @@ async function renderizarTablaVentasYFiados() {
 
     html += '</tbody></table>';
     cont.innerHTML = html;
+  }
+}
+
+// --- DASHBOARD DE INICIO (TOTAL HOY, BARRAS SEMANALES Y PRODUCTOS ESCASOS) ---
+async function renderizarDashboardInicio(repuestos) {
+  const ventas = await db.ventas.toArray();
+  const hoyStr = obtenerFechaLocalYYYYMMDD(new Date().toISOString());
+
+  // 1. Total vendido hoy
+  const ventasHoy = ventas.filter(v => obtenerFechaLocalYYYYMMDD(v.created_at) === hoyStr);
+  const totalHoy = ventasHoy.reduce((acc, v) => acc + Number(v.total || 0), 0);
+
+  const totalHoyEl = document.getElementById('inicio-total-hoy');
+  const cantHoyEl = document.getElementById('inicio-cantidad-ventas-hoy');
+  if (totalHoyEl) totalHoyEl.textContent = `$${totalHoy.toLocaleString('es-CO')}`;
+  if (cantHoyEl) cantHoyEl.textContent = `${ventasHoy.length} ${ventasHoy.length === 1 ? 'venta registrada' : 'ventas registradas'} hoy`;
+
+  // 2. Diagrama de barras de los últimos 7 días
+  const graficaEl = document.getElementById('inicio-grafica-semana');
+  if (graficaEl) {
+    const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const ultimos7 = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = obtenerFechaLocalYYYYMMDD(d.toISOString());
+      const sumaDia = ventas
+        .filter(v => obtenerFechaLocalYYYYMMDD(v.created_at) === key)
+        .reduce((acc, v) => acc + Number(v.total || 0), 0);
+
+      ultimos7.push({
+        label: diasSemana[d.getDay()],
+        total: sumaDia,
+        esHoy: i === 0
+      });
+    }
+
+    const maxValor = Math.max(...ultimos7.map(d => d.total), 1);
+    graficaEl.innerHTML = ultimos7.map(d => {
+      const porcentajeAltura = Math.round((d.total / maxValor) * 100);
+      const textoCorto = d.total >= 1000 ? `$${Math.round(d.total / 1000)}k` : (d.total > 0 ? `$${d.total}` : '$0');
+      return `
+        <div class="bar-col">
+          <div class="bar-val">${textoCorto}</div>
+          <div class="bar-fill ${d.esHoy ? 'today' : ''}" style="height: ${Math.max(4, porcentajeAltura)}%;"></div>
+          <div class="bar-day">${d.label}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // 3. Productos con pocas unidades (<= 3)
+  const pocosEl = document.getElementById('inicio-pocos-productos');
+  if (pocosEl) {
+    const escasos = repuestos
+      .filter(r => Math.max(0, r.stock_actual) <= 3)
+      .sort((a, b) => a.stock_actual - b.stock_actual);
+
+    if (escasos.length === 0) {
+      pocosEl.innerHTML = '<p style="color:var(--primary); font-size:13.5px; margin:0;">Todos tus productos tienen buena cantidad disponible.</p>';
+    } else {
+      pocosEl.innerHTML = escasos.map(r => {
+        const cant = Math.max(0, r.stock_actual);
+        const etiqueta = cant === 0 ? 'Agotado (0)' : `Quedan ${cant}`;
+        return `
+          <div class="item-row">
+            <div>
+              <strong>[${r.codigo}] ${r.nombre}</strong><br>
+              <small style="color:var(--muted);">${r.marca_compatible || 'Universal'}</small>
+            </div>
+            <span class="stock-low">${etiqueta}</span>
+          </div>
+        `;
+      }).join('');
+    }
   }
 }
 
@@ -620,7 +793,6 @@ async function exportarExcelCompleto() {
     detallesPorVenta[d.venta_id].push(`${d.cantidad}x ${mapaRep[d.repuesto_id] || 'Producto'}`);
   });
 
-  // Hoja 1: Inventario
   const hojaInventario = repuestos.map(r => ({
     'Código': r.codigo,
     'Producto': r.nombre,
@@ -632,7 +804,6 @@ async function exportarExcelCompleto() {
     'Fecha Ingreso': new Date(r.created_at || r.updated_at).toLocaleString('es-CO')
   }));
 
-  // Hoja 2: Ventas
   const hojaVentas = ventas.map(v => ({
     'Fecha y Hora': new Date(v.created_at).toLocaleString('es-CO'),
     'Cliente': v.cliente_nombre,
@@ -643,7 +814,6 @@ async function exportarExcelCompleto() {
     'Vendedor': mapaUsuarios[v.usuario_id] || 'Sistema'
   }));
 
-  // Hoja 3: Clientes Fiados
   const hojaFiados = ventas
     .filter(v => v.metodo_pago === 'Fiado')
     .map(f => ({
@@ -654,7 +824,6 @@ async function exportarExcelCompleto() {
       'Estado': f.estado === 'FIADO_PENDIENTE' ? 'Pendiente por cobrar' : 'Pagado'
     }));
 
-  // Hoja 4: Gastos
   const hojaGastos = gastos.map(g => ({
     'Fecha': new Date(g.created_at).toLocaleString('es-CO'),
     'Categoría': g.categoria,
@@ -673,10 +842,10 @@ async function exportarExcelCompleto() {
   XLSX.writeFile(wb, `Reporte_Guadanas_POS_${fechaHoy}.xlsx`);
 }
 
-// --- CREAR USUARIOS VENDEDORES (SOLO ADMIN) ---
+// --- INVITAR / CREAR USUARIOS EN EL MISMO NEGOCIO (SOLO ADMIN) ---
 async function crearNuevoUsuario(e) {
   e.preventDefault();
-  if (!navigator.onLine) return alert('Necesitas internet para registrar una cuenta nueva en el servidor.');
+  if (!navigator.onLine) return alert('Necesitas internet para invitar una cuenta nueva a tu equipo.');
   const sesion = getSession();
 
   const body = {
@@ -699,6 +868,7 @@ async function crearNuevoUsuario(e) {
     if (!res.ok) throw new Error(data.detail || 'Error al crear usuario');
     alert(data.mensaje);
     e.target.reset();
+    toggleFormularioEmpleado(false);
     sincronizarDatos();
   } catch (err) {
     alert(err.message);
@@ -731,7 +901,7 @@ function formatearDetalleLog(accion, det) {
   return JSON.stringify(det);
 }
 
-// --- RENDERIZADO DE PANTALLAS ---
+// --- RENDERIZADO GENERAL DE PANTALLAS ---
 async function renderizarTodo() {
   const sesion = getSession();
   if (!sesion) return;
@@ -740,6 +910,9 @@ async function renderizarTodo() {
   const filtroInv = (document.getElementById('buscador-inventario')?.value || '').toLowerCase();
 
   const repuestos = await db.repuestos.filter(r => !r.deleted_at).toArray();
+
+  // 0. Dashboard Inicio
+  await renderizarDashboardInicio(repuestos);
 
   // 1. Lista para VENDER (Oculta productos con cantidad 0)
   const disponiblesPOS = repuestos.filter(r =>
@@ -760,7 +933,7 @@ async function renderizarTodo() {
       <div class="item-row">
         <div class="item-info">
           ${imgHtml}
-          <div>
+          <div class="item-details">
             <strong>${r.nombre}</strong> <small>(${r.codigo})</small><br>
             <small>${r.marca_compatible || 'Universal'} | Cantidad: <span class="${cantClass}">${r.stock_actual}</span></small>
           </div>
@@ -775,7 +948,7 @@ async function renderizarTodo() {
   // 2. Tablas de Ventas y Fiados
   await renderizarTablaVentasYFiados();
 
-  // 3. Lista de INVENTARIO (Filtros + Editar + Eliminar + Cantidad + Fecha + Foto)
+  // 3. Lista de INVENTARIO con botones en vertical a la derecha
   const invFiltrados = repuestos.filter(r => {
     const coincideTexto =
       r.nombre.toLowerCase().includes(filtroInv) ||
@@ -794,28 +967,27 @@ async function renderizarTodo() {
     const fechaIngreso = new Date(r.created_at || r.updated_at).toLocaleDateString('es-CO');
     const imgHtml = r.foto ? `<img src="${r.foto}" class="prod-thumb" alt="${r.nombre}">` : '';
     const controlesAdmin = esAdmin ? `
-      <div style="display:flex; gap:4px; justify-content:flex-end; margin-top:6px; flex-wrap:wrap;">
-        <button class="small secondary" onclick="ajustarStockRapido('${r.id}', -1)">-1</button>
-        <button class="small" onclick="ajustarStockRapido('${r.id}', 1)">+1</button>
-        <button class="small warning" onclick="editarProductoInventario('${r.id}')">Editar</button>
-        <button class="small danger" onclick="eliminarProductoDefinitivo('${r.id}')">Eliminar</button>
-      </div>` : '';
+      <div class="inv-qty-row">
+        <button class="secondary" onclick="ajustarStockRapido('${r.id}', -1)">-1</button>
+        <button onclick="ajustarStockRapido('${r.id}', 1)">+1</button>
+      </div>
+      <button class="warning" onclick="editarProductoInventario('${r.id}')">Editar</button>
+      <button class="danger" onclick="eliminarProductoDefinitivo('${r.id}')">Eliminar</button>
+    ` : '';
 
     invLista.innerHTML += `
       <div class="item-row">
         <div class="item-info">
           ${imgHtml}
-          <div>
+          <div class="item-details">
             <strong>[${r.codigo}] ${r.nombre}</strong><br>
             <small>Compatibilidad: ${r.marca_compatible || 'N/A'}</small><br>
-            <small>Venta: $${r.precio_venta.toLocaleString('es-CO')} ${esAdmin ? `| Costo: $${r.precio_compra.toLocaleString('es-CO')}` : ''}</small><br>
+            <small>Venta: <strong>$${r.precio_venta.toLocaleString('es-CO')}</strong> ${esAdmin ? `| Costo: $${r.precio_compra.toLocaleString('es-CO')}` : ''}</small><br>
+            <small class="${cantSegura <= r.stock_minimo ? 'stock-low' : ''}">Cantidad: ${cantSegura}</small><br>
             <small style="color:var(--muted);">Ingreso: ${fechaIngreso}</small>
           </div>
         </div>
-        <div style="text-align:right; flex-shrink:0;">
-          <span class="${cantSegura <= r.stock_minimo ? 'stock-low' : ''}">Cantidad: ${cantSegura}</span>
-          ${controlesAdmin}
-        </div>
+        ${esAdmin ? `<div class="inv-actions-col">${controlesAdmin}</div>` : `<span class="${cantSegura <= r.stock_minimo ? 'stock-low' : ''}">Cant: ${cantSegura}</span>`}
       </div>`;
   });
 

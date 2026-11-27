@@ -5,17 +5,19 @@ from database import Base
 class Usuario(Base):
     __tablename__ = "usuarios"
     id = Column(UUID(as_uuid=True), primary_key=True)
+    negocio_id = Column(UUID(as_uuid=True), nullable=True)
     nombre = Column(String(100), nullable=False)
     email = Column(String(120), unique=True, nullable=False)
     password_hash = Column(Text, nullable=False)
-    rol = Column(String(20), nullable=False)
+    rol = Column(String(20), nullable=False)  # 'ADMIN' o 'VENDEDOR'
     activo = Column(Boolean, default=True)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
 class Repuesto(Base):
     __tablename__ = "repuestos"
     id = Column(UUID(as_uuid=True), primary_key=True)
-    codigo = Column(String(50), unique=True, nullable=False)
+    negocio_id = Column(UUID(as_uuid=True), nullable=True)
+    codigo = Column(String(50), nullable=False)
     nombre = Column(String(150), nullable=False)
     marca_compatible = Column(String(100))
     categoria = Column(String(50), default="General")
@@ -32,6 +34,7 @@ class Repuesto(Base):
 class Venta(Base):
     __tablename__ = "ventas"
     id = Column(UUID(as_uuid=True), primary_key=True)
+    negocio_id = Column(UUID(as_uuid=True), nullable=True)
     usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
     cliente_nombre = Column(String(100), default="Mostrador")
     metodo_pago = Column(String(30), nullable=False)
@@ -52,6 +55,7 @@ class DetalleVenta(Base):
 class Gasto(Base):
     __tablename__ = "gastos"
     id = Column(UUID(as_uuid=True), primary_key=True)
+    negocio_id = Column(UUID(as_uuid=True), nullable=True)
     usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
     categoria = Column(String(50), nullable=False)
     descripcion = Column(String(255), nullable=False)
@@ -63,6 +67,7 @@ class Gasto(Base):
 class AuditoriaLog(Base):
     __tablename__ = "auditoria_logs"
     id = Column(UUID(as_uuid=True), primary_key=True)
+    negocio_id = Column(UUID(as_uuid=True), nullable=True)
     usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
     tabla_afectada = Column(String(50), nullable=False)
     registro_id = Column(UUID(as_uuid=True), nullable=False)
