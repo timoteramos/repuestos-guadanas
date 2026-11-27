@@ -93,7 +93,6 @@ async function iniciarSesion(e) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Error al iniciar sesión');
 
-    // Si inicia sesión una cuenta de otro negocio, limpiar IndexedDB local para garantizar privacidad total
     const sesionPrevia = getSession();
     if (!sesionPrevia || sesionPrevia.usuario?.negocio_id !== data.usuario?.negocio_id) {
       await limpiarBaseLocalPorCambioCuenta();
@@ -132,7 +131,6 @@ function iniciarInterfaz(sesion) {
     else el.classList.add('hidden');
   });
 
-  // Mantener formularios cerrados por defecto al entrar
   cerrarFormularioProducto();
   toggleFormularioEmpleado(false);
 }
@@ -145,6 +143,36 @@ function mostrarTab(tabId, btn) {
 
   if (tabId === 'tab-inventario') cerrarFormularioProducto();
   if (tabId === 'tab-admin') toggleFormularioEmpleado(false);
+}
+
+// --- VENTANA DEDICADA DE REGISTRO DE VENTAS Y CLIENTES FIADOS (DESDE INICIO) ---
+function abrirVistaVentasFiados() {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+  document.getElementById('tab-ventas-fiados').classList.remove('hidden');
+  renderizarTablaVentasYFiados();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function volverAInicio() {
+  const btnInicio = document.getElementById('nav-inicio');
+  mostrarTab('tab-inicio', btnInicio);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// --- BOTÓN Y TABLA OCULTA DE INGRESOS DIARIOS EN INICIO ---
+function toggleTablaIngresos() {
+  const box = document.getElementById('box-tabla-ingresos');
+  const btn = document.getElementById('btn-toggle-ingresos');
+  if (!box || !btn) return;
+
+  const abrir = box.classList.contains('hidden');
+  if (abrir) {
+    box.classList.remove('hidden');
+    btn.textContent = 'Ocultar Ingresos';
+  } else {
+    box.classList.add('hidden');
+    btn.textContent = 'Ingresos';
+  }
 }
 
 // --- FORMULARIO DESPLEGABLE DE EMPLEADO ---
@@ -556,7 +584,7 @@ async function confirmarVenta() {
 
 function cambiarTablaVentas(tipo, btn) {
   tablaVentasActual = tipo;
-  document.querySelectorAll('#tab-ventas .filtros-bar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#tab-ventas-fiados .filtros-bar button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
 
   const filtroFechaBox = document.getElementById('filtro-fecha-ventas-box');
@@ -697,21 +725,89 @@ async function renderizarTablaVentasYFiados() {
   }
 }
 
-// --- DASHBOARD DE INICIO (TOTAL HOY, BARRAS SEMANALES Y PRODUCTOS ESCASOS) ---
+// --- DASHBOARD DE INICIO (VENDIDO HOY, GASTOS HOY, INGRESOS NETOS HOY + TABLA DIARIA, BARRAS Y ESCASOS) ---
 async function renderizarDashboardInicio(repuestos) {
   const ventas = await db.ventas.toArray();
+  const gastos = await db.gastos.toArray();
   const hoyStr = obtenerFechaLocalYYYYMMDD(new Date().toISOString());
 
   // 1. Total vendido hoy
   const ventasHoy = ventas.filter(v => obtenerFechaLocalYYYYMMDD(v.created_at) === hoyStr);
-  const totalHoy = ventasHoy.reduce((acc, v) => acc + Number(v.total || 0), 0);
+  const totalVendidoHoy = ventasHoy.reduce((acc, v) => acc + Number(v.total || 0), 0);
 
   const totalHoyEl = document.getElementById('inicio-total-hoy');
   const cantHoyEl = document.getElementById('inicio-cantidad-ventas-hoy');
-  if (totalHoyEl) totalHoyEl.textContent = `$${totalHoy.toLocaleString('es-CO')}`;
+  if (totalHoyEl) totalHoyEl.textContent = `$${totalVendidoHoy.toLocaleString('es-CO')}`;
   if (cantHoyEl) cantHoyEl.textContent = `${ventasHoy.length} ${ventasHoy.length === 1 ? 'venta registrada' : 'ventas registradas'} hoy`;
 
-  // 2. Diagrama de barras de los últimos 7 días
+  // 2. Total gastos de hoy
+  const gastosHoy = gastos.filter(g => obtenerFechaLocalYYYYMMDD(g.created_at) === hoyStr);
+  const totalGastosHoy = gastosHoy.reduce((acc, g) => acc + Number(g.monto || 0), 0);
+
+  const gastosHoyEl = document.getElementById('inicio-gastos-hoy');
+  const cantGastosHoyEl = document.getElementById('inicio-cantidad-gastos-hoy');
+  if (gastosHoyEl) gastosHoyEl.textContent = `$${totalGastosHoy.toLocaleString('es-CO')}`;
+  if (cantGastosHoyEl) cantGastosHoyEl.textContent = `${gastosHoy.length} ${gastosHoy.length === 1 ? 'gasto registrado' : 'gastos registrados'} hoy`;
+
+  // 3. Ingresos netos de hoy (Vendido hoy - Gastos de hoy)
+  const ingresosNetosHoy = totalVendidoHoy - totalGastosHoy;
+  const ingresosHoyEl = document.getElementById('inicio-ingresos-hoy');
+  if (ingresosHoyEl) {
+    const signo = ingresosNetosHoy < 0 ? '-' : '';
+    ingresosHoyEl.textContent = `${signo}$${Math.abs(ingresosNetosHoy).toLocaleString('es-CO')}`;
+    ingresosHoyEl.style.color = ingresosNetosHoy < 0 ? 'var(--danger)' : '#0284c7';
+  }
+
+  // 4. Tabla oculta de Ingresos Netos por Día (Fecha y Valor de cada día)
+  const tablaIngresosCont = document.getElementById('contenedor-tabla-ingresos');
+  if (tablaIngresosCont) {
+    const resumenPorDia = {};
+
+    ventas.forEach(v => {
+      const f = obtenerFechaLocalYYYYMMDD(v.created_at);
+      if (!resumenPorDia[f]) resumenPorDia[f] = { ventas: 0, gastos: 0 };
+      resumenPorDia[f].ventas += Number(v.total || 0);
+    });
+
+    gastos.forEach(g => {
+      const f = obtenerFechaLocalYYYYMMDD(g.created_at);
+      if (!resumenPorDia[f]) resumenPorDia[f] = { ventas: 0, gastos: 0 };
+      resumenPorDia[f].gastos += Number(g.monto || 0);
+    });
+
+    const fechasOrdenadas = Object.keys(resumenPorDia).sort().reverse();
+    if (fechasOrdenadas.length === 0) {
+      tablaIngresosCont.innerHTML = '<p style="color:var(--muted); margin:0;">Aún no hay movimientos registrados.</p>';
+    } else {
+      let htmlIng = `
+        <table class="pos-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Valor (Ingresos del día)</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+      fechasOrdenadas.forEach(fKey => {
+        const [y, m, d] = fKey.split('-');
+        const fechaFormateada = `${d}/${m}/${y}`;
+        const neto = resumenPorDia[fKey].ventas - resumenPorDia[fKey].gastos;
+        const color = neto < 0 ? 'var(--danger)' : 'var(--primary)';
+        const signo = neto < 0 ? '-' : '';
+        htmlIng += `
+          <tr>
+            <td><strong>${fechaFormateada}</strong></td>
+            <td style="color:${color}; font-weight:bold;">${signo}$${Math.abs(neto).toLocaleString('es-CO')}</td>
+          </tr>`;
+      });
+
+      htmlIng += '</tbody></table>';
+      tablaIngresosCont.innerHTML = htmlIng;
+    }
+  }
+
+  // 5. Diagrama de barras de los últimos 7 días
   const graficaEl = document.getElementById('inicio-grafica-semana');
   if (graficaEl) {
     const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -746,7 +842,7 @@ async function renderizarDashboardInicio(repuestos) {
     }).join('');
   }
 
-  // 3. Productos con pocas unidades (<= 3)
+  // 6. Productos con pocas unidades (<= 3)
   const pocosEl = document.getElementById('inicio-pocos-productos');
   if (pocosEl) {
     const escasos = repuestos
@@ -911,7 +1007,7 @@ async function renderizarTodo() {
 
   const repuestos = await db.repuestos.filter(r => !r.deleted_at).toArray();
 
-  // 0. Dashboard Inicio
+  // 0. Dashboard Inicio (Vendido hoy, Gastos hoy, Ingresos netos hoy + tabla, Gráfica, Escasos)
   await renderizarDashboardInicio(repuestos);
 
   // 1. Lista para VENDER (Oculta productos con cantidad 0)
@@ -945,7 +1041,7 @@ async function renderizarTodo() {
       </div>`;
   });
 
-  // 2. Tablas de Ventas y Fiados
+  // 2. Tablas de Ventas y Fiados (en su ventana dedicada)
   await renderizarTablaVentasYFiados();
 
   // 3. Lista de INVENTARIO con botones en vertical a la derecha

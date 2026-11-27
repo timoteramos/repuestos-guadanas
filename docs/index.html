@@ -61,14 +61,41 @@
         <div class="welcome-banner">
           <h2 id="inicio-saludo" style="margin:0 0 6px 0; font-size:20px;">¡Bienvenido a tu sistema de gestión!</h2>
           <p style="margin:0; font-size:13.5px; color:#cbd5e1; line-height:1.45;">
-            Aquí tienes el resumen en tiempo real de tu negocio. Controla tus ventas diarias, revisa el rendimiento de toda la semana y mantente al tanto de los repuestos que están próximos a agotarse para surtir a tiempo.
+            Aquí tienes el resumen en tiempo real de tu negocio. Controla tus ventas diarias, revisa tus gastos, consulta tus ingresos netos y mantente al tanto de los repuestos próximos a agotarse.
           </p>
         </div>
 
+        <!-- BOTÓN PARA ABRIR LA VENTANA DE REGISTRO DE VENTAS Y CLIENTES FIADOS -->
+        <button type="button" class="secondary" style="margin-bottom:12px;" onclick="abrirVistaVentasFiados()">
+          Registro de Ventas y Clientes Fiados
+        </button>
+
+        <!-- TARJETAS DEL DÍA: VENDIDO HOY, GASTOS DE HOY E INGRESOS NETOS DE HOY -->
         <div class="card kpi-card">
           <small style="color:var(--muted); font-weight:600; text-transform:uppercase;">Total vendido hoy</small>
-          <div id="inicio-total-hoy" style="font-size:28px; font-weight:800; color:var(--primary); margin-top:4px;">$0</div>
+          <div id="inicio-total-hoy" style="font-size:26px; font-weight:800; color:var(--primary); margin-top:4px;">$0</div>
           <small id="inicio-cantidad-ventas-hoy" style="color:var(--muted);">0 ventas registradas hoy</small>
+        </div>
+
+        <div class="card" style="border-left: 5px solid var(--danger);">
+          <small style="color:var(--muted); font-weight:600; text-transform:uppercase;">Total gastos de hoy</small>
+          <div id="inicio-gastos-hoy" style="font-size:24px; font-weight:800; color:var(--danger); margin-top:4px;">$0</div>
+          <small id="inicio-cantidad-gastos-hoy" style="color:var(--muted);">0 gastos registrados hoy</small>
+        </div>
+
+        <div class="card" style="border-left: 5px solid #0284c7;">
+          <small style="color:var(--muted); font-weight:600; text-transform:uppercase;">Ingresos netos de hoy (Ventas - Gastos)</small>
+          <div id="inicio-ingresos-hoy" style="font-size:26px; font-weight:800; color:#0284c7; margin-top:4px;">$0</div>
+          <small style="color:var(--muted);">Ganancia neta del día actual</small>
+
+          <button type="button" id="btn-toggle-ingresos" style="margin-top:12px; margin-bottom:0; background:#0284c7;" onclick="toggleTablaIngresos()">
+            Ingresos
+          </button>
+
+          <!-- TABLA OCULTA HASTA TOCAR EL BOTÓN "INGRESOS" -->
+          <div id="box-tabla-ingresos" class="hidden" style="margin-top:12px;">
+            <div id="contenedor-tabla-ingresos" class="table-responsive"></div>
+          </div>
         </div>
 
         <div class="card">
@@ -84,7 +111,29 @@
         </div>
       </section>
 
-      <!-- PESTAÑA 2: PUNTO DE VENTA (POS) -->
+      <!-- VENTANA DEDICADA: REGISTRO DE VENTAS Y CLIENTES FIADOS (SE ABRE DESDE INICIO) -->
+      <section id="tab-ventas-fiados" class="tab-content hidden">
+        <div style="margin-bottom:12px;">
+          <button type="button" class="secondary" style="margin-bottom:0;" onclick="volverAInicio()">← Volver a Inicio</button>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">Registro de Ventas y Clientes Fiados</h3>
+          <div class="filtros-bar">
+            <button type="button" id="btn-tabla-ventas" class="active" onclick="cambiarTablaVentas('ventas', this)">Registro de Ventas</button>
+            <button type="button" id="btn-tabla-fiados" onclick="cambiarTablaVentas('fiados', this)">Clientes Fiados</button>
+          </div>
+
+          <div id="filtro-fecha-ventas-box" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+            <input type="date" id="filtro-fecha-ventas" style="margin-bottom:0; flex:1;" onchange="renderizarTablaVentasYFiados()">
+            <button type="button" class="small secondary" onclick="limpiarFiltroFechaVentas()">Ver todas</button>
+          </div>
+
+          <div id="contenedor-tabla-ventas" class="table-responsive"></div>
+        </div>
+      </section>
+
+      <!-- PESTAÑA 2: PUNTO DE VENTA (POS - SOLO VENDER Y CARRITO) -->
       <section id="tab-ventas" class="tab-content hidden">
         <div class="card">
           <h3 style="margin-top:0;">Nueva Venta</h3>
@@ -112,21 +161,6 @@
             <option value="Fiado">Fiado</option>
           </select>
           <button onclick="confirmarVenta()">Registrar Venta</button>
-        </div>
-
-        <!-- TABLAS DE REGISTRO DE VENTAS (CON FILTRO POR FECHA) Y CLIENTES FIADOS -->
-        <div class="card">
-          <div class="filtros-bar">
-            <button type="button" id="btn-tabla-ventas" class="active" onclick="cambiarTablaVentas('ventas', this)">Registro de Ventas</button>
-            <button type="button" id="btn-tabla-fiados" onclick="cambiarTablaVentas('fiados', this)">Clientes Fiados</button>
-          </div>
-
-          <div id="filtro-fecha-ventas-box" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-            <input type="date" id="filtro-fecha-ventas" style="margin-bottom:0; flex:1;" onchange="renderizarTablaVentasYFiados()">
-            <button type="button" class="small secondary" onclick="limpiarFiltroFechaVentas()">Ver todas</button>
-          </div>
-
-          <div id="contenedor-tabla-ventas" class="table-responsive"></div>
         </div>
       </section>
 
@@ -225,7 +259,6 @@
           <button style="margin-bottom:0;" onclick="exportarExcelCompleto()">Descargar Hoja de Excel (.xlsx)</button>
         </div>
 
-        <!-- Botón desplegable para invitar Administrador o Vendedor -->
         <div class="admin-only" style="margin-bottom: 14px;">
           <button id="btn-toggle-empleado" class="secondary" style="margin-bottom:0;" onclick="toggleFormularioEmpleado()">+ Invitar / Crear Cuenta de Equipo (Admin o Vendedor)</button>
         </div>
@@ -257,11 +290,11 @@
 
     <!-- BARRA INFERIOR DE NAVEGACIÓN (5 PESTAÑAS) -->
     <nav class="bottom-nav">
-      <button class="active" onclick="mostrarTab('tab-inicio', this)">Inicio</button>
-      <button onclick="mostrarTab('tab-ventas', this)">Vender</button>
-      <button onclick="mostrarTab('tab-inventario', this)">Inventario</button>
-      <button onclick="mostrarTab('tab-gastos', this)">Gastos</button>
-      <button onclick="mostrarTab('tab-admin', this)">Cuenta</button>
+      <button id="nav-inicio" class="active" onclick="mostrarTab('tab-inicio', this)">Inicio</button>
+      <button id="nav-ventas" onclick="mostrarTab('tab-ventas', this)">Vender</button>
+      <button id="nav-inventario" onclick="mostrarTab('tab-inventario', this)">Inventario</button>
+      <button id="nav-gastos" onclick="mostrarTab('tab-gastos', this)">Gastos</button>
+      <button id="nav-admin" onclick="mostrarTab('tab-admin', this)">Cuenta</button>
     </nav>
   </div>
 
