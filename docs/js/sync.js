@@ -1,4 +1,4 @@
-const API_URL = 'https://repuestos-guadanas-api.onrender.com';
+const API_URL = 'https://api-repuestos-guadanas.onrender.com';
 
 async function sincronizarDatos() {
   if (!navigator.onLine) return;
