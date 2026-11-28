@@ -221,3 +221,44 @@ button.small { width: auto; padding: 6px 10px; font-size: 12px; margin: 0; }
   font-size: 13px; padding: 10px; border-left: 3px solid var(--danger);
   background: #f8fafc; margin-bottom: 8px; border-radius: 6px;
 }
+/* Campo de contraseña con botón Mostrar / Ocultar */
+.password-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.password-wrapper input {
+  margin-bottom: 0;
+  padding-right: 78px;
+}
+.btn-toggle-pass {
+  position: absolute;
+  right: 6px;
+  width: auto;
+  padding: 6px 10px;
+  margin: 0;
+  font-size: 12px;
+  background: #e2e8f0;
+  color: #334155;
+  border-radius: 6px;
+}
+.btn-toggle-pass:active {
+  background: #cbd5e1;
+}
+.pass-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: -6px;
+  margin-bottom: 10px;
+}
+.error-box {
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  margin-bottom: 10px;
+}

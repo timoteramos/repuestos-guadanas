@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Any
@@ -13,7 +14,6 @@ from auth import hash_password, verify_password, create_access_token, get_curren
 
 Base.metadata.create_all(bind=engine)
 
-# Migración segura en Neon: agrega negocio_id y asigna tus registros previos a tu negocio principal
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS foto TEXT"))
     conn.execute(text("ALTER TABLE repuestos ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"))
@@ -21,7 +21,6 @@ with engine.begin() as conn:
         conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS negocio_id UUID"))
     conn.execute(text("ALTER TABLE repuestos DROP CONSTRAINT IF EXISTS repuestos_codigo_key"))
 
-    # Vincular datos existentes sin negocio_id al primer admin registrado
     primer_admin = conn.execute(text("SELECT id, negocio_id FROM usuarios ORDER BY updated_at ASC LIMIT 1")).fetchone()
     if primer_admin:
         neg_id = primer_admin.negocio_id or primer_admin.id
@@ -122,14 +121,24 @@ def obtener_negocio_id(user: Usuario, db: Session) -> uuid.UUID:
         db.commit()
     return user.negocio_id
 
+def validar_password_segura(password: str):
+    if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]", password) or not re.search(r"\d", password):
+        raise HTTPException(
+            status_code=400,
+            detail="La contraseña debe contener al menos una letra y un número."
+        )
+
 # --- ENDPOINTS DE AUTENTICACIÓN ---
 
 @app.post("/auth/register")
 def registrar_cuenta_nueva(data: RegistroPublicoRequest, db: Session = Depends(get_db)):
-    """Crea una cuenta nueva de Administrador con su propio espacio de datos aislado."""
     email_limpio = data.email.lower().strip()
+    if not data.nombre.strip():
+        raise HTTPException(status_code=400, detail="Debes escribir tu nombre o el nombre del local.")
+    validar_password_segura(data.password)
+
     if db.query(Usuario).filter(Usuario.email == email_limpio).first():
-        raise HTTPException(status_code=400, detail="Ese correo ya está registrado. Inicia sesión.")
+        raise HTTPException(status_code=400, detail="Ese correo electrónico ya está registrado. Intenta iniciar sesión.")
 
     nuevo_id = uuid.uuid4()
     negocio_id = uuid.uuid4()
@@ -181,11 +190,14 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 
 @app.post("/usuarios", dependencies=[Depends(require_admin)])
 def crear_usuario(data: CrearUsuarioRequest, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Invita a otro Administrador o Vendedor al mismo negocio para compartir datos."""
     if data.rol not in ["ADMIN", "VENDEDOR"]:
-        raise HTTPException(status_code=400, detail="Rol debe ser ADMIN o VENDEDOR")
+        raise HTTPException(status_code=400, detail="El rol seleccionado debe ser Administrador o Vendedor.")
+    if not data.nombre.strip():
+        raise HTTPException(status_code=400, detail="Debes escribir el nombre del usuario.")
+    validar_password_segura(data.password)
+
     if db.query(Usuario).filter(Usuario.email == data.email.lower().strip()).first():
-        raise HTTPException(status_code=400, detail="Ese correo ya está registrado")
+        raise HTTPException(status_code=400, detail="Ese correo electrónico ya está registrado en el sistema.")
 
     negocio_id = obtener_negocio_id(current_user, db)
     nuevo = Usuario(
@@ -297,7 +309,7 @@ def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_c
     repuestos = query_repuestos.all()
     ventas = query_ventas.order_by(Venta.created_at.desc()).limit(500).all()
     gastos = query_gastos.order_by(Gasto.created_at.desc()).all() if current_user.rol == "ADMIN" else []
-    usuarios = db.query(Usuario.id, Usuario.nombre, Usuario.rol, Usuario.activo).filter(Usuario.negocio_id == negocio_id).all()
+    usuarios = db.query(Usuario.id, Usuario.nombre, Usuario.email, Usuario.rol, Usuario.activo).filter(Usuario.negocio_id == negocio_id).all()
     logs = query_auditoria.order_by(AuditoriaLog.fecha_hora.desc()).limit(200).all() if current_user.rol == "ADMIN" else []
 
     ventas_data = []
@@ -327,7 +339,7 @@ def sync_pull(since: Optional[str] = None, current_user: Usuario = Depends(get_c
 
     return {
         "server_time": datetime.now(timezone.utc).isoformat(),
-        "usuarios": [{"id": str(u.id), "nombre": u.nombre, "rol": u.rol, "activo": u.activo} for u in usuarios],
+        "usuarios": [{"id": str(u.id), "nombre": u.nombre, "email": u.email, "rol": u.rol, "activo": u.activo} for u in usuarios],
         "repuestos": [
             {
                 "id": str(r.id),

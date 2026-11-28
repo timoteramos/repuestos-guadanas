@@ -19,10 +19,13 @@
       <p style="color:var(--muted); font-size:14px;">Inicia sesión con tu cuenta para gestionar tu inventario y ventas en línea o sin internet.</p>
       <form onsubmit="iniciarSesion(event)">
         <input type="email" id="login-email" placeholder="Correo electrónico" required>
-        <input type="password" id="login-pass" placeholder="Contraseña" required>
+        <div class="password-wrapper">
+          <input type="password" id="login-pass" placeholder="Contraseña" required>
+          <button type="button" class="btn-toggle-pass" onclick="toggleVisibilidadPassword('login-pass', this)">Mostrar</button>
+        </div>
         <button type="submit">Entrar al Sistema</button>
       </form>
-      <p id="login-error" style="color:var(--danger); font-size:14px;"></p>
+      <div id="login-error" class="error-box hidden"></div>
       <hr style="border:none; border-top:1px solid var(--border); margin:14px 0;">
       <p style="font-size:13px; color:var(--muted); margin-bottom:8px;">¿Eres nuevo y quieres tu propio espacio privado?</p>
       <button type="button" class="secondary" style="margin-bottom:0;" onclick="mostrarFormularioRegistroPublico(true)">Crear Cuenta de Administrador</button>
@@ -34,10 +37,14 @@
       <form onsubmit="registrarCuentaNueva(event)">
         <input type="text" id="reg-nombre" placeholder="Tu nombre o nombre del local" required>
         <input type="email" id="reg-email" placeholder="Correo electrónico" required>
-        <input type="password" id="reg-pass" placeholder="Crea una contraseña" minlength="4" required>
+        <div class="password-wrapper">
+          <input type="password" id="reg-pass" placeholder="Crea una contraseña" required>
+          <button type="button" class="btn-toggle-pass" onclick="toggleVisibilidadPassword('reg-pass', this)">Mostrar</button>
+        </div>
+        <small class="pass-hint">La contraseña tiene que tener al menos un número y mínimo una letra.</small>
         <button type="submit">Crear mi Cuenta y Entrar</button>
       </form>
-      <p id="reg-error" style="color:var(--danger); font-size:14px;"></p>
+      <div id="reg-error" class="error-box hidden"></div>
       <button type="button" class="secondary" style="margin-bottom:0;" onclick="mostrarFormularioRegistroPublico(false)">Ya tengo cuenta — Volver a Iniciar Sesión</button>
     </div>
   </div>
@@ -65,9 +72,9 @@
           </p>
         </div>
 
-        <!-- BOTÓN PARA ABRIR LA VENTANA DE REGISTRO DE VENTAS Y CLIENTES FIADOS -->
-        <button type="button" class="secondary" style="margin-bottom:12px;" onclick="abrirVistaVentasFiados()">
-          Registro de Ventas y Clientes Fiados
+        <!-- BOTÓN PARA ABRIR LA VENTANA DE REGISTRO DE VENTAS Y PAGOS PENDIENTES -->
+        <button type="button" class="secondary" style="margin-bottom:12px;" onclick="abrirVistaVentasPendientes()">
+          Registro de Ventas y Pagos Pendientes
         </button>
 
         <!-- TARJETAS DEL DÍA: VENDIDO HOY, GASTOS DE HOY E INGRESOS NETOS DE HOY -->
@@ -92,7 +99,6 @@
             Ingresos
           </button>
 
-          <!-- TABLA OCULTA HASTA TOCAR EL BOTÓN "INGRESOS" -->
           <div id="box-tabla-ingresos" class="hidden" style="margin-top:12px;">
             <div id="contenedor-tabla-ingresos" class="table-responsive"></div>
           </div>
@@ -111,21 +117,21 @@
         </div>
       </section>
 
-      <!-- VENTANA DEDICADA: REGISTRO DE VENTAS Y CLIENTES FIADOS (SE ABRE DESDE INICIO) -->
-      <section id="tab-ventas-fiados" class="tab-content hidden">
+      <!-- VENTANA DEDICADA: REGISTRO DE VENTAS Y PAGOS PENDIENTES -->
+      <section id="tab-ventas-pendientes" class="tab-content hidden">
         <div style="margin-bottom:12px;">
           <button type="button" class="secondary" style="margin-bottom:0;" onclick="volverAInicio()">← Volver a Inicio</button>
         </div>
 
         <div class="card">
-          <h3 style="margin-top:0;">Registro de Ventas y Clientes Fiados</h3>
+          <h3 style="margin-top:0;">Registro de Ventas y Pagos Pendientes</h3>
           <div class="filtros-bar">
             <button type="button" id="btn-tabla-ventas" class="active" onclick="cambiarTablaVentas('ventas', this)">Registro de Ventas</button>
-            <button type="button" id="btn-tabla-fiados" onclick="cambiarTablaVentas('fiados', this)">Clientes Fiados</button>
+            <button type="button" id="btn-tabla-pendientes" onclick="cambiarTablaVentas('pendientes', this)">Pagos Pendientes</button>
           </div>
 
           <div id="filtro-fecha-ventas-box" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-            <input type="date" id="filtro-fecha-ventas" style="margin-bottom:0; flex:1;" onchange="renderizarTablaVentasYFiados()">
+            <input type="date" id="filtro-fecha-ventas" style="margin-bottom:0; flex:1;" onchange="renderizarTablaVentasYPendientes()">
             <button type="button" class="small secondary" onclick="limpiarFiltroFechaVentas()">Ver todas</button>
           </div>
 
@@ -133,7 +139,7 @@
         </div>
       </section>
 
-      <!-- PESTAÑA 2: PUNTO DE VENTA (POS - SOLO VENDER Y CARRITO) -->
+      <!-- PESTAÑA 2: PUNTO DE VENTA (POS) -->
       <section id="tab-ventas" class="tab-content hidden">
         <div class="card">
           <h3 style="margin-top:0;">Nueva Venta</h3>
@@ -149,7 +155,7 @@
             <span>Total a cobrar:</span>
             <strong id="carrito-total">$0</strong>
           </div>
-          <input type="text" id="venta-cliente" placeholder="Nombre del cliente (obligatorio si es Fiado o Crédito)">
+          <input type="text" id="venta-cliente" placeholder="Nombre del cliente (obligatorio si es Pagos Pendientes o Crédito)">
 
           <label class="field-label" for="venta-metodo">Medios de pago</label>
           <select id="venta-metodo">
@@ -158,7 +164,7 @@
             <option value="Daviplata">Daviplata</option>
             <option value="Transferencia">Transferencia</option>
             <option value="Credito">Crédito</option>
-            <option value="Fiado">Fiado</option>
+            <option value="Pagos Pendientes">Pagos Pendientes</option>
           </select>
           <button onclick="confirmarVenta()">Registrar Venta</button>
         </div>
@@ -255,7 +261,7 @@
 
         <div class="card admin-only">
           <h3 style="margin-top:0;">Exportar Reporte Completo</h3>
-          <p style="font-size:13px; color:var(--muted); margin-top:0;">Descarga un archivo de Excel (.xlsx) organizado por hojas con el Inventario, Ventas, Fiados y Gastos de tu cuenta.</p>
+          <p style="font-size:13px; color:var(--muted); margin-top:0;">Descarga un archivo de Excel (.xlsx) organizado por hojas con el Inventario, Ventas, Pagos Pendientes y Gastos de tu cuenta.</p>
           <button style="margin-bottom:0;" onclick="exportarExcelCompleto()">Descargar Hoja de Excel (.xlsx)</button>
         </div>
 
@@ -272,13 +278,23 @@
           <form onsubmit="crearNuevoUsuario(event)">
             <input type="text" id="usr-nombre" placeholder="Nombre de la persona" required>
             <input type="email" id="usr-email" placeholder="Correo electrónico" required>
-            <input type="password" id="usr-pass" placeholder="Contraseña de acceso" required>
+            <div class="password-wrapper">
+              <input type="password" id="usr-pass" placeholder="Contraseña de acceso" required>
+              <button type="button" class="btn-toggle-pass" onclick="toggleVisibilidadPassword('usr-pass', this)">Mostrar</button>
+            </div>
+            <small class="pass-hint">La contraseña tiene que tener al menos un número y mínimo una letra.</small>
             <select id="usr-rol">
               <option value="ADMIN">Administrador (Comparte y puede editar todo)</option>
               <option value="VENDEDOR">Vendedor (Solo registra ventas y consulta)</option>
             </select>
+            <div id="usr-error" class="error-box hidden"></div>
             <button type="submit">Registrar en mi Equipo</button>
           </form>
+        </div>
+
+        <div class="card admin-only">
+          <h3 style="margin-top:0;">Cuentas del Equipo</h3>
+          <div id="usuarios-equipo-lista"></div>
         </div>
 
         <div class="card admin-only">
@@ -288,7 +304,7 @@
       </section>
     </main>
 
-    <!-- BARRA INFERIOR DE NAVEGACIÓN (5 PESTAÑAS) -->
+    <!-- BARRA INFERIOR DE NAVEGACIÓN -->
     <nav class="bottom-nav">
       <button id="nav-inicio" class="active" onclick="mostrarTab('tab-inicio', this)">Inicio</button>
       <button id="nav-ventas" onclick="mostrarTab('tab-ventas', this)">Vender</button>

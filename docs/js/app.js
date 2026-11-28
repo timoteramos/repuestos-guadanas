@@ -32,10 +32,48 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+// --- VER / OCULTAR CONTRASEÑA Y VALIDACIÓN ---
+function toggleVisibilidadPassword(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = 'Ocultar';
+  } else {
+    input.type = 'password';
+    btn.textContent = 'Mostrar';
+  }
+}
+
+function validarContrasenaCliente(pass) {
+  const tieneLetra = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(pass);
+  const tieneNumero = /\d/.test(pass);
+  if (!tieneLetra || !tieneNumero) {
+    return 'Error en contraseña: debe incluir al menos una letra y un número.';
+  }
+  return null;
+}
+
+function mostrarErrorCaja(elementId, mensaje) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  if (mensaje) {
+    el.textContent = mensaje;
+    el.classList.remove('hidden');
+  } else {
+    el.textContent = '';
+    el.classList.add('hidden');
+  }
+}
+
+function esMetodoPagoPendiente(metodo) {
+  return metodo === 'Pagos Pendientes' || metodo === 'Fiado';
+}
+
 // --- AUTENTICACIÓN Y REGISTRO DE CUENTA NUEVA ---
 function mostrarFormularioRegistroPublico(mostrar) {
-  document.getElementById('login-error').textContent = '';
-  document.getElementById('reg-error').textContent = '';
+  mostrarErrorCaja('login-error', '');
+  mostrarErrorCaja('reg-error', '');
   if (mostrar) {
     document.getElementById('box-login').classList.add('hidden');
     document.getElementById('box-register').classList.remove('hidden');
@@ -47,16 +85,22 @@ function mostrarFormularioRegistroPublico(mostrar) {
 
 async function registrarCuentaNueva(e) {
   e.preventDefault();
+  mostrarErrorCaja('reg-error', '');
+
   if (!navigator.onLine) {
-    document.getElementById('reg-error').textContent = 'Necesitas conexión a internet para crear tu cuenta por primera vez.';
+    mostrarErrorCaja('reg-error', 'No hay conexión a internet. Conéctate para registrar tu cuenta por primera vez.');
     return;
   }
 
   const nombre = document.getElementById('reg-nombre').value.trim();
   const email = document.getElementById('reg-email').value.trim();
   const password = document.getElementById('reg-pass').value;
-  const errorEl = document.getElementById('reg-error');
-  errorEl.textContent = '';
+
+  const errorPass = validarContrasenaCliente(password);
+  if (errorPass) {
+    mostrarErrorCaja('reg-error', errorPass);
+    return;
+  }
 
   try {
     const res = await fetch(`${API_URL}/auth/register`, {
@@ -64,8 +108,13 @@ async function registrarCuentaNueva(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nombre, email, password })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'No se pudo crear la cuenta');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detalle = Array.isArray(data.detail)
+        ? data.detail.map(d => d.msg).join(', ')
+        : (data.detail || `Error del servidor (código ${res.status}) al crear la cuenta.`);
+      throw new Error(detalle);
+    }
 
     await limpiarBaseLocalPorCambioCuenta();
     localStorage.setItem('sesion_guadanas', JSON.stringify(data));
@@ -73,7 +122,7 @@ async function registrarCuentaNueva(e) {
     await sincronizarDatos();
     await renderizarTodo();
   } catch (err) {
-    errorEl.textContent = err.message;
+    mostrarErrorCaja('reg-error', `No se pudo crear la cuenta: ${err.message}`);
   }
 }
 
@@ -81,8 +130,7 @@ async function iniciarSesion(e) {
   e.preventDefault();
   const email = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-pass').value;
-  const errorEl = document.getElementById('login-error');
-  errorEl.textContent = '';
+  mostrarErrorCaja('login-error', '');
 
   try {
     const res = await fetch(`${API_URL}/auth/login`, {
@@ -90,8 +138,8 @@ async function iniciarSesion(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Error al iniciar sesión');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Correo o contraseña incorrectos.');
 
     const sesionPrevia = getSession();
     if (!sesionPrevia || sesionPrevia.usuario?.negocio_id !== data.usuario?.negocio_id) {
@@ -103,7 +151,7 @@ async function iniciarSesion(e) {
     await sincronizarDatos();
     await renderizarTodo();
   } catch (err) {
-    errorEl.textContent = err.message;
+    mostrarErrorCaja('login-error', err.message);
   }
 }
 
@@ -145,11 +193,11 @@ function mostrarTab(tabId, btn) {
   if (tabId === 'tab-admin') toggleFormularioEmpleado(false);
 }
 
-// --- VENTANA DEDICADA DE REGISTRO DE VENTAS Y CLIENTES FIADOS (DESDE INICIO) ---
-function abrirVistaVentasFiados() {
+// --- VENTANA DEDICADA DE REGISTRO DE VENTAS Y PAGOS PENDIENTES ---
+function abrirVistaVentasPendientes() {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
-  document.getElementById('tab-ventas-fiados').classList.remove('hidden');
-  renderizarTablaVentasYFiados();
+  document.getElementById('tab-ventas-pendientes').classList.remove('hidden');
+  renderizarTablaVentasYPendientes();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -183,6 +231,7 @@ function toggleFormularioEmpleado(forzar = null) {
   const esAdmin = getSession()?.usuario?.rol === 'ADMIN';
   if (!esAdmin) return;
 
+  mostrarErrorCaja('usr-error', '');
   const abrir = forzar !== null ? forzar : card.classList.contains('hidden');
   if (abrir) {
     card.classList.remove('hidden');
@@ -472,7 +521,7 @@ async function guardarGasto(e) {
   sincronizarDatos();
 }
 
-// --- PUNTO DE VENTA (POS) Y TABLA DE VENTAS / FIADOS ---
+// --- PUNTO DE VENTA (POS) Y TABLA DE VENTAS / PAGOS PENDIENTES ---
 function agregarAlCarrito(rep) {
   if (rep.stock_actual <= 0) return alert('Sin cantidad disponible de este producto.');
   const existente = carrito.find(i => i.repuesto.id === rep.id);
@@ -521,12 +570,12 @@ async function confirmarVenta() {
   const metodo = document.getElementById('venta-metodo').value;
   const clienteInput = document.getElementById('venta-cliente').value.trim();
 
-  if ((metodo === 'Fiado' || metodo === 'Credito') && !clienteInput) {
-    return alert('Escribe el nombre del cliente cuando la venta es Fiado o Crédito.');
+  if ((esMetodoPagoPendiente(metodo) || metodo === 'Credito') && !clienteInput) {
+    return alert('Escribe el nombre del cliente cuando la venta es Pagos Pendientes o Crédito.');
   }
 
   const cliente = clienteInput || 'Mostrador';
-  const estadoVenta = metodo === 'Fiado' ? 'FIADO_PENDIENTE' : 'COMPLETADA';
+  const estadoVenta = esMetodoPagoPendiente(metodo) ? 'PAGO_PENDIENTE' : 'COMPLETADA';
 
   let total = 0;
   const detalles = [];
@@ -584,7 +633,7 @@ async function confirmarVenta() {
 
 function cambiarTablaVentas(tipo, btn) {
   tablaVentasActual = tipo;
-  document.querySelectorAll('#tab-ventas-fiados .filtros-bar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#tab-ventas-pendientes .filtros-bar button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
 
   const filtroFechaBox = document.getElementById('filtro-fecha-ventas-box');
@@ -592,13 +641,13 @@ function cambiarTablaVentas(tipo, btn) {
     if (tipo === 'ventas') filtroFechaBox.classList.remove('hidden');
     else filtroFechaBox.classList.add('hidden');
   }
-  renderizarTablaVentasYFiados();
+  renderizarTablaVentasYPendientes();
 }
 
 function limpiarFiltroFechaVentas() {
   const input = document.getElementById('filtro-fecha-ventas');
   if (input) input.value = '';
-  renderizarTablaVentasYFiados();
+  renderizarTablaVentasYPendientes();
 }
 
 function obtenerFechaLocalYYYYMMDD(isoString) {
@@ -609,7 +658,7 @@ function obtenerFechaLocalYYYYMMDD(isoString) {
   return `${year}-${month}-${day}`;
 }
 
-async function marcarFiadoPagado(ventaId) {
+async function marcarPagoPendienteCobrado(ventaId) {
   const venta = await db.ventas.get(ventaId);
   if (!venta) return;
   if (!confirm(`¿Confirmar que ${venta.cliente_nombre} pagó $${Number(venta.total).toLocaleString('es-CO')}?`)) return;
@@ -619,17 +668,17 @@ async function marcarFiadoPagado(ventaId) {
   venta.sincronizado = 0;
 
   await db.ventas.put(venta);
-  await registrarAuditoria('ventas', ventaId, 'FIADO_PAGADO', null, {
+  await registrarAuditoria('ventas', ventaId, 'PAGO_PENDIENTE_COBRADO', null, {
     cliente: venta.cliente_nombre,
     total: venta.total,
-    metodo: 'Fiado Pagado'
+    metodo: 'Pago Pendiente Cobrado'
   });
 
   await renderizarTodo();
   sincronizarDatos();
 }
 
-async function renderizarTablaVentasYFiados() {
+async function renderizarTablaVentasYPendientes() {
   const cont = document.getElementById('contenedor-tabla-ventas');
   if (!cont) return;
 
@@ -645,10 +694,10 @@ async function renderizarTablaVentasYFiados() {
     detallesPorVenta[d.venta_id].push(`${d.cantidad}x ${nombreProd}`);
   });
 
-  if (tablaVentasActual === 'fiados') {
-    const fiados = ventas.filter(v => v.metodo_pago === 'Fiado');
-    if (fiados.length === 0) {
-      cont.innerHTML = '<p style="color:var(--muted);">No hay clientes fiados registrados.</p>';
+  if (tablaVentasActual === 'pendientes') {
+    const pendientesLista = ventas.filter(v => esMetodoPagoPendiente(v.metodo_pago));
+    if (pendientesLista.length === 0) {
+      cont.innerHTML = '<p style="color:var(--muted);">No hay pagos pendientes registrados.</p>';
       return;
     }
 
@@ -664,12 +713,12 @@ async function renderizarTablaVentasYFiados() {
         </thead>
         <tbody>`;
 
-    fiados.forEach(f => {
+    pendientesLista.forEach(f => {
       const fecha = new Date(f.created_at).toLocaleDateString('es-CO');
       const itemsTxt = (detallesPorVenta[f.id] || []).join(', ') || 'Venta';
-      const pendiente = f.estado === 'FIADO_PENDIENTE';
-      const accionHtml = pendiente
-        ? `<button class="small" onclick="marcarFiadoPagado('${f.id}')">Cobrar</button>`
+      const estaPendiente = f.estado === 'PAGO_PENDIENTE' || f.estado === 'FIADO_PENDIENTE';
+      const accionHtml = estaPendiente
+        ? `<button class="small" onclick="marcarPagoPendienteCobrado('${f.id}')">Cobrar</button>`
         : `<span style="color:var(--primary); font-weight:bold;">Pagado</span>`;
 
       html += `
@@ -711,11 +760,12 @@ async function renderizarTablaVentasYFiados() {
         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
       });
       const itemsTxt = (detallesPorVenta[v.id] || []).join(', ') || 'Venta';
+      const etiquetaPago = esMetodoPagoPendiente(v.metodo_pago) ? 'Pagos Pendientes' : v.metodo_pago;
       html += `
         <tr>
           <td>${fecha}</td>
           <td><strong>${v.cliente_nombre}</strong><br><small>${itemsTxt}</small></td>
-          <td>${v.metodo_pago}</td>
+          <td>${etiquetaPago}</td>
           <td><strong>$${Number(v.total).toLocaleString('es-CO')}</strong></td>
         </tr>`;
     });
@@ -725,13 +775,12 @@ async function renderizarTablaVentasYFiados() {
   }
 }
 
-// --- DASHBOARD DE INICIO (VENDIDO HOY, GASTOS HOY, INGRESOS NETOS HOY + TABLA DIARIA, BARRAS Y ESCASOS) ---
+// --- DASHBOARD DE INICIO ---
 async function renderizarDashboardInicio(repuestos) {
   const ventas = await db.ventas.toArray();
   const gastos = await db.gastos.toArray();
   const hoyStr = obtenerFechaLocalYYYYMMDD(new Date().toISOString());
 
-  // 1. Total vendido hoy
   const ventasHoy = ventas.filter(v => obtenerFechaLocalYYYYMMDD(v.created_at) === hoyStr);
   const totalVendidoHoy = ventasHoy.reduce((acc, v) => acc + Number(v.total || 0), 0);
 
@@ -740,7 +789,6 @@ async function renderizarDashboardInicio(repuestos) {
   if (totalHoyEl) totalHoyEl.textContent = `$${totalVendidoHoy.toLocaleString('es-CO')}`;
   if (cantHoyEl) cantHoyEl.textContent = `${ventasHoy.length} ${ventasHoy.length === 1 ? 'venta registrada' : 'ventas registradas'} hoy`;
 
-  // 2. Total gastos de hoy
   const gastosHoy = gastos.filter(g => obtenerFechaLocalYYYYMMDD(g.created_at) === hoyStr);
   const totalGastosHoy = gastosHoy.reduce((acc, g) => acc + Number(g.monto || 0), 0);
 
@@ -749,7 +797,6 @@ async function renderizarDashboardInicio(repuestos) {
   if (gastosHoyEl) gastosHoyEl.textContent = `$${totalGastosHoy.toLocaleString('es-CO')}`;
   if (cantGastosHoyEl) cantGastosHoyEl.textContent = `${gastosHoy.length} ${gastosHoy.length === 1 ? 'gasto registrado' : 'gastos registrados'} hoy`;
 
-  // 3. Ingresos netos de hoy (Vendido hoy - Gastos de hoy)
   const ingresosNetosHoy = totalVendidoHoy - totalGastosHoy;
   const ingresosHoyEl = document.getElementById('inicio-ingresos-hoy');
   if (ingresosHoyEl) {
@@ -758,7 +805,6 @@ async function renderizarDashboardInicio(repuestos) {
     ingresosHoyEl.style.color = ingresosNetosHoy < 0 ? 'var(--danger)' : '#0284c7';
   }
 
-  // 4. Tabla oculta de Ingresos Netos por Día (Fecha y Valor de cada día)
   const tablaIngresosCont = document.getElementById('contenedor-tabla-ingresos');
   if (tablaIngresosCont) {
     const resumenPorDia = {};
@@ -807,7 +853,6 @@ async function renderizarDashboardInicio(repuestos) {
     }
   }
 
-  // 5. Diagrama de barras de los últimos 7 días
   const graficaEl = document.getElementById('inicio-grafica-semana');
   if (graficaEl) {
     const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -842,7 +887,6 @@ async function renderizarDashboardInicio(repuestos) {
     }).join('');
   }
 
-  // 6. Productos con pocas unidades (<= 3)
   const pocosEl = document.getElementById('inicio-pocos-productos');
   if (pocosEl) {
     const escasos = repuestos
@@ -904,20 +948,20 @@ async function exportarExcelCompleto() {
     'Fecha y Hora': new Date(v.created_at).toLocaleString('es-CO'),
     'Cliente': v.cliente_nombre,
     'Productos': (detallesPorVenta[v.id] || []).join(', '),
-    'Medio de Pago': v.metodo_pago,
+    'Medio de Pago': esMetodoPagoPendiente(v.metodo_pago) ? 'Pagos Pendientes' : v.metodo_pago,
     'Estado': v.estado,
     'Total ($)': Number(v.total || 0),
     'Vendedor': mapaUsuarios[v.usuario_id] || 'Sistema'
   }));
 
-  const hojaFiados = ventas
-    .filter(v => v.metodo_pago === 'Fiado')
+  const hojaPendientes = ventas
+    .filter(v => esMetodoPagoPendiente(v.metodo_pago))
     .map(f => ({
       'Fecha': new Date(f.created_at).toLocaleString('es-CO'),
       'Cliente': f.cliente_nombre,
       'Productos': (detallesPorVenta[f.id] || []).join(', '),
       'Valor ($)': Number(f.total || 0),
-      'Estado': f.estado === 'FIADO_PENDIENTE' ? 'Pendiente por cobrar' : 'Pagado'
+      'Estado': (f.estado === 'PAGO_PENDIENTE' || f.estado === 'FIADO_PENDIENTE') ? 'Pendiente por cobrar' : 'Pagado'
     }));
 
   const hojaGastos = gastos.map(g => ({
@@ -931,7 +975,7 @@ async function exportarExcelCompleto() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaInventario.length ? hojaInventario : [{ Mensaje: 'Sin datos' }]), 'Inventario');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaVentas.length ? hojaVentas : [{ Mensaje: 'Sin datos' }]), 'Ventas');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaFiados.length ? hojaFiados : [{ Mensaje: 'Sin datos' }]), 'Fiados');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaPendientes.length ? hojaPendientes : [{ Mensaje: 'Sin datos' }]), 'Pagos Pendientes');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hojaGastos.length ? hojaGastos : [{ Mensaje: 'Sin datos' }]), 'Gastos');
 
   const fechaHoy = new Date().toISOString().slice(0, 10);
@@ -941,15 +985,24 @@ async function exportarExcelCompleto() {
 // --- INVITAR / CREAR USUARIOS EN EL MISMO NEGOCIO (SOLO ADMIN) ---
 async function crearNuevoUsuario(e) {
   e.preventDefault();
-  if (!navigator.onLine) return alert('Necesitas internet para invitar una cuenta nueva a tu equipo.');
-  const sesion = getSession();
+  mostrarErrorCaja('usr-error', '');
 
-  const body = {
-    nombre: document.getElementById('usr-nombre').value.trim(),
-    email: document.getElementById('usr-email').value.trim(),
-    password: document.getElementById('usr-pass').value,
-    rol: document.getElementById('usr-rol').value
-  };
+  if (!navigator.onLine) {
+    mostrarErrorCaja('usr-error', 'No hay conexión a internet. Necesitas conexión para registrar una cuenta nueva en tu equipo.');
+    return;
+  }
+
+  const sesion = getSession();
+  const nombre = document.getElementById('usr-nombre').value.trim();
+  const email = document.getElementById('usr-email').value.trim();
+  const password = document.getElementById('usr-pass').value;
+  const rol = document.getElementById('usr-rol').value;
+
+  const errorPass = validarContrasenaCliente(password);
+  if (errorPass) {
+    mostrarErrorCaja('usr-error', errorPass);
+    return;
+  }
 
   try {
     const res = await fetch(`${API_URL}/usuarios`, {
@@ -958,16 +1011,22 @@ async function crearNuevoUsuario(e) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${sesion.access_token}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ nombre, email, password, rol })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Error al crear usuario');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detalle = Array.isArray(data.detail)
+        ? data.detail.map(d => d.msg).join(', ')
+        : (data.detail || `Error del servidor (código ${res.status}) al registrar el usuario.`);
+      throw new Error(detalle);
+    }
+
     alert(data.mensaje);
     e.target.reset();
     toggleFormularioEmpleado(false);
-    sincronizarDatos();
+    await sincronizarDatos();
   } catch (err) {
-    alert(err.message);
+    mostrarErrorCaja('usr-error', `No se pudo registrar la cuenta: ${err.message}`);
   }
 }
 
@@ -987,9 +1046,10 @@ function formatearDetalleLog(accion, det) {
     const cant = det.cantidad ?? det.stock ?? 0;
     return `${det.nombre || 'Producto'} • Nueva cantidad: ${cant}`;
   }
-  if (accion === 'VENTA_REGISTRADA' || accion === 'FIADO_PAGADO') {
+  if (accion === 'VENTA_REGISTRADA' || accion === 'PAGO_PENDIENTE_COBRADO' || accion === 'FIADO_PAGADO') {
     const items = Array.isArray(det.items) ? det.items.join(', ') : '';
-    return `${items ? items + ' • ' : ''}Total: $${Number(det.total || 0).toLocaleString('es-CO')} (${det.metodo || ''}) • Cliente: ${det.cliente || 'Mostrador'}`;
+    const metodoTxt = esMetodoPagoPendiente(det.metodo) ? 'Pagos Pendientes' : (det.metodo || '');
+    return `${items ? items + ' • ' : ''}Total: $${Number(det.total || 0).toLocaleString('es-CO')} (${metodoTxt}) • Cliente: ${det.cliente || 'Mostrador'}`;
   }
   if (accion === 'GASTO_REGISTRADO') {
     return `${det.categoria || ''}: ${det.descripcion || ''} • -$${Number(det.monto || 0).toLocaleString('es-CO')} (${det.metodo || ''})`;
@@ -1007,10 +1067,10 @@ async function renderizarTodo() {
 
   const repuestos = await db.repuestos.filter(r => !r.deleted_at).toArray();
 
-  // 0. Dashboard Inicio (Vendido hoy, Gastos hoy, Ingresos netos hoy + tabla, Gráfica, Escasos)
+  // 0. Dashboard Inicio
   await renderizarDashboardInicio(repuestos);
 
-  // 1. Lista para VENDER (Oculta productos con cantidad 0)
+  // 1. Lista para VENDER
   const disponiblesPOS = repuestos.filter(r =>
     r.stock_actual > 0 &&
     (
@@ -1041,10 +1101,10 @@ async function renderizarTodo() {
       </div>`;
   });
 
-  // 2. Tablas de Ventas y Fiados (en su ventana dedicada)
-  await renderizarTablaVentasYFiados();
+  // 2. Tablas de Ventas y Pagos Pendientes
+  await renderizarTablaVentasYPendientes();
 
-  // 3. Lista de INVENTARIO con botones en vertical a la derecha
+  // 3. Lista de INVENTARIO
   const invFiltrados = repuestos.filter(r => {
     const coincideTexto =
       r.nombre.toLowerCase().includes(filtroInv) ||
@@ -1111,9 +1171,25 @@ async function renderizarTodo() {
   }
   if (totalGastosEl) totalGastosEl.textContent = `Total: $${totalGastos.toLocaleString('es-CO')}`;
 
-  // 5. Historial de Auditoría (Solo ADMIN)
+  // 5. Cuentas del Equipo y Auditoría (Solo ADMIN)
   if (esAdmin) {
     const usuarios = await db.usuarios.toArray();
+
+    const listaUsuariosCont = document.getElementById('usuarios-equipo-lista');
+    if (listaUsuariosCont) {
+      listaUsuariosCont.innerHTML = usuarios.length === 0
+        ? '<p style="color:var(--muted);">No hay usuarios cargados. Presiona Sincronizar.</p>'
+        : usuarios.map(u => `
+          <div class="item-row">
+            <div>
+              <strong>${u.nombre}</strong> <small>(${u.rol})</small><br>
+              <small style="color:var(--muted);">${u.email || 'Sincronizado'}</small>
+            </div>
+            <span class="badge ${u.activo ? 'online' : 'offline'}">${u.activo ? 'Activo' : 'Inactivo'}</span>
+          </div>
+        `).join('');
+    }
+
     const mapaUsuarios = Object.fromEntries(usuarios.map(u => [u.id, u.nombre]));
     const logs = await db.auditoria_logs.orderBy('fecha_hora').reverse().limit(50).toArray();
     const auditCont = document.getElementById('auditoria-lista');
