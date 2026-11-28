@@ -70,7 +70,7 @@ function esMetodoPagoPendiente(metodo) {
   return metodo === 'Pagos Pendientes' || metodo === 'Fiado';
 }
 
-// --- AUTENTICACIÓN, REGISTRO Y ELIMINACIÓN DE CUENTA ---
+// --- AUTENTICACIÓN, REGISTRO, INVITACIONES Y ELIMINACIÓN DE CUENTA ---
 function mostrarFormularioRegistroPublico(mostrar) {
   mostrarErrorCaja('login-error', '');
   mostrarErrorCaja('reg-error', '');
@@ -163,6 +163,84 @@ async function cerrarSesion() {
   }
 }
 
+async function responderInvitacionEquipo(aceptar) {
+  const sesion = getSession();
+  if (!sesion) return;
+
+  if (!navigator.onLine) {
+    return alert('Necesitas conexión a internet para responder a la invitación.');
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/equipo/responder-invitacion?aceptar=${aceptar ? 'true' : 'false'}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sesion.access_token}`
+      }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || 'No se pudo procesar la respuesta a la invitación.');
+    }
+
+    if (aceptar) {
+      await limpiarBaseLocalPorCambioCuenta();
+    }
+
+    localStorage.setItem('sesion_guadanas', JSON.stringify({
+      access_token: data.access_token,
+      usuario: data.usuario
+    }));
+
+    alert(data.mensaje || (aceptar ? 'Te has unido al equipo.' : 'Invitación rechazada.'));
+    iniciarInterfaz(getSession());
+    await sincronizarDatos();
+    await renderizarTodo();
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
+async function salirDelEquipoInvitado() {
+  const sesion = getSession();
+  if (!sesion) return;
+
+  if (!navigator.onLine) {
+    return alert('Necesitas conexión a internet para salir del equipo y restaurar tus datos personales.');
+  }
+
+  const confirmar = confirm(
+    '¿Deseas salir de la invitación del equipo?\n\nDejarás de ver los datos de este equipo y volverás a tu propia cuenta con toda la información que tenías antes de entrar.'
+  );
+  if (!confirmar) return;
+
+  try {
+    const res = await fetch(`${API_URL}/equipo/salir`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sesion.access_token}`
+      }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || 'No se pudo salir del equipo.');
+    }
+
+    await limpiarBaseLocalPorCambioCuenta();
+    localStorage.setItem('sesion_guadanas', JSON.stringify({
+      access_token: data.access_token,
+      usuario: data.usuario
+    }));
+
+    alert(data.mensaje || 'Has salido del equipo. Tus datos anteriores fueron restaurados.');
+    iniciarInterfaz(getSession());
+    await sincronizarDatos();
+    await renderizarTodo();
+  } catch (err) {
+    alert(`No se pudo salir del equipo: ${err.message}`);
+  }
+}
+
 async function eliminarMiCuenta() {
   const sesion = getSession();
   if (!sesion) return;
@@ -172,19 +250,23 @@ async function eliminarMiCuenta() {
   }
 
   const confirmar1 = confirm(
-    `¿Estás seguro de que quieres eliminar la cuenta "${sesion.usuario.nombre}" (${sesion.usuario.email})?\n\nSi la eliminas, toda la información que tenía esta cuenta se borrará permanentemente.`
+    `¿Estás seguro de que quieres eliminar la cuenta "${sesion.usuario.nombre}" (${sesion.usuario.email})?\n\nSi hay otros administradores en el equipo, la información del negocio se conservará intacta.`
   );
   if (!confirmar1) return;
 
   const confirmar2 = confirm(
-    'CONFIRMACIÓN FINAL: Esta acción NO se puede deshacer y eliminará todos los datos asociados. ¿Deseas eliminar la cuenta definitivamente?'
+    'CONFIRMACIÓN FINAL: Esta acción eliminará tu cuenta de acceso de forma permanente. ¿Deseas continuar?'
   );
   if (!confirmar2) return;
 
   try {
+    // Despertar servidor si Render estaba en reposo
+    await fetch(`${API_URL}/health`).catch(() => {});
+
     const res = await fetch(`${API_URL}/auth/eliminar-cuenta`, {
-      method: 'DELETE',
+      method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         'Authorization': `Bearer ${sesion.access_token}`
       }
     });
@@ -195,29 +277,55 @@ async function eliminarMiCuenta() {
 
     await limpiarBaseLocalPorCambioCuenta();
     localStorage.removeItem('sesion_guadanas');
-    alert(data.mensaje || 'Tu cuenta y toda su información han sido eliminadas.');
+    alert(data.mensaje || 'Tu cuenta ha sido eliminada.');
     location.reload();
   } catch (err) {
-    alert(`No se pudo eliminar la cuenta: ${err.message}`);
+    alert(`No se pudo eliminar la cuenta: ${err.message}\n\nVerifica tu conexión a internet e inténtalo nuevamente.`);
   }
+}
+
+function actualizarBannerInvitacionYEquipo(sesion) {
+  const u = sesion?.usuario || {};
+  document.getElementById('user-info').textContent = `${u.nombre} (${u.rol})`;
+
+  const bannerInv = document.getElementById('banner-invitacion');
+  const textoInv = document.getElementById('texto-invitacion');
+  if (bannerInv && textoInv) {
+    if (u.invitacion_pendiente) {
+      const rolTxt = u.invitacion_pendiente.rol === 'ADMIN' ? 'Administrador' : 'Vendedor';
+      textoInv.innerHTML = `<strong>${u.invitacion_pendiente.remitente}</strong> te ha invitado a unirte a su equipo como <strong>${rolTxt}</strong>. Si aceptas, tus datos actuales quedarán guardados para cuando decidas salir. ¿Deseas unirte?`;
+      bannerInv.classList.remove('hidden');
+    } else {
+      bannerInv.classList.add('hidden');
+    }
+  }
+
+  const btnSalirEquipo = document.getElementById('btn-salir-equipo');
+  if (btnSalirEquipo) {
+    if (u.en_equipo_invitado) {
+      btnSalirEquipo.classList.remove('hidden');
+    } else {
+      btnSalirEquipo.classList.add('hidden');
+    }
+  }
+
+  const soloAdmin = document.querySelectorAll('.admin-only');
+  soloAdmin.forEach(el => {
+    if (u.rol === 'ADMIN') el.classList.remove('hidden');
+    else el.classList.add('hidden');
+  });
 }
 
 function iniciarInterfaz(sesion) {
   document.getElementById('view-login').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
-  document.getElementById('user-info').textContent = `${sesion.usuario.nombre} (${sesion.usuario.rol})`;
 
   const saludoEl = document.getElementById('inicio-saludo');
   if (saludoEl) {
     saludoEl.textContent = `¡Bienvenido, ${sesion.usuario.nombre}!`;
   }
 
-  const soloAdmin = document.querySelectorAll('.admin-only');
-  soloAdmin.forEach(el => {
-    if (sesion.usuario.rol === 'ADMIN') el.classList.remove('hidden');
-    else el.classList.add('hidden');
-  });
-
+  actualizarBannerInvitacionYEquipo(sesion);
   cerrarFormularioProducto();
   toggleFormularioEmpleado(false);
 }
@@ -1021,13 +1129,13 @@ async function exportarExcelCompleto() {
   XLSX.writeFile(wb, `Reporte_Guadanas_POS_${fechaHoy}.xlsx`);
 }
 
-// --- INVITAR / CREAR USUARIOS EN EL MISMO NEGOCIO (SOLO ADMIN) ---
+// --- INVITAR / CREAR USUARIOS EN EL EQUIPO (SOLO ADMIN) ---
 async function crearNuevoUsuario(e) {
   e.preventDefault();
   mostrarErrorCaja('usr-error', '');
 
   if (!navigator.onLine) {
-    mostrarErrorCaja('usr-error', 'No hay conexión a internet. Necesitas conexión para registrar una cuenta nueva en tu equipo.');
+    mostrarErrorCaja('usr-error', 'No hay conexión a internet. Necesitas conexión para enviar la invitación.');
     return;
   }
 
@@ -1037,10 +1145,12 @@ async function crearNuevoUsuario(e) {
   const password = document.getElementById('usr-pass').value;
   const rol = document.getElementById('usr-rol').value;
 
-  const errorPass = validarContrasenaCliente(password);
-  if (errorPass) {
-    mostrarErrorCaja('usr-error', errorPass);
-    return;
+  if (password) {
+    const errorPass = validarContrasenaCliente(password);
+    if (errorPass) {
+      mostrarErrorCaja('usr-error', errorPass);
+      return;
+    }
   }
 
   try {
@@ -1056,7 +1166,7 @@ async function crearNuevoUsuario(e) {
     if (!res.ok) {
       const detalle = Array.isArray(data.detail)
         ? data.detail.map(d => d.msg).join(', ')
-        : (data.detail || `Error del servidor (código ${res.status}) al registrar el usuario.`);
+        : (data.detail || `Error del servidor (código ${res.status}) al enviar invitación.`);
       throw new Error(detalle);
     }
 
@@ -1065,7 +1175,7 @@ async function crearNuevoUsuario(e) {
     toggleFormularioEmpleado(false);
     await sincronizarDatos();
   } catch (err) {
-    mostrarErrorCaja('usr-error', `No se pudo registrar la cuenta: ${err.message}`);
+    mostrarErrorCaja('usr-error', `No se pudo enviar invitación: ${err.message}`);
   }
 }
 

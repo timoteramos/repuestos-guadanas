@@ -65,6 +65,16 @@
     <main class="container">
       <!-- PESTAÑA 1: INICIO (DASHBOARD) -->
       <section id="tab-inicio" class="tab-content">
+        <!-- BANNER DE INVITACIÓN DE EQUIPO PENDIENTE (PIDE PERMISO) -->
+        <div id="banner-invitacion" class="card hidden" style="border-left: 5px solid #0284c7; background: #eff6ff;">
+          <h3 style="margin-top:0; margin-bottom:6px; color:#0f172a;">Invitación a Equipo de Trabajo</h3>
+          <p id="texto-invitacion" style="margin:0 0 12px 0; font-size:13.5px; color:#1e293b;"></p>
+          <div style="display:flex; gap:8px;">
+            <button type="button" style="margin-bottom:0;" onclick="responderInvitacionEquipo(true)">Aceptar y Unirme</button>
+            <button type="button" class="secondary" style="margin-bottom:0;" onclick="responderInvitacionEquipo(false)">Rechazar</button>
+          </div>
+        </div>
+
         <div class="welcome-banner">
           <h2 id="inicio-saludo" style="margin:0 0 6px 0; font-size:20px;">¡Bienvenido a tu sistema de gestión!</h2>
           <p style="margin:0; font-size:13.5px; color:#cbd5e1; line-height:1.45;">
@@ -257,6 +267,7 @@
       <section id="tab-admin" class="tab-content hidden">
         <div class="card">
           <button class="secondary" style="margin-bottom:10px;" onclick="cerrarSesion()">Cerrar Sesión</button>
+          <button id="btn-salir-equipo" class="warning hidden" style="margin-bottom:10px;" onclick="salirDelEquipoInvitado()">Salir de la Invitación del Equipo</button>
           <button class="danger" style="margin-bottom:0;" onclick="eliminarMiCuenta()">Eliminar Cuenta</button>
         </div>
 
@@ -275,21 +286,23 @@
             <h3 style="margin:0;">Invitar a tu Equipo</h3>
             <button type="button" class="small secondary" onclick="toggleFormularioEmpleado(false)">Cerrar</button>
           </div>
-          <p style="font-size:12.5px; color:var(--muted); margin-top:0;">Las personas que agregues aquí compartirán exactamente tu mismo inventario, ventas y gastos.</p>
+          <p style="font-size:12.5px; color:var(--muted); margin-top:0;">
+            Si el correo ya tiene cuenta, le llegará una invitación para que acepte o rechace unirse. Si es correo nuevo, se creará con su propio espacio privado y la invitación lista para aceptar.
+          </p>
           <form onsubmit="crearNuevoUsuario(event)">
-            <input type="text" id="usr-nombre" placeholder="Nombre de la persona" required>
+            <input type="text" id="usr-nombre" placeholder="Nombre de la persona (opcional si ya tiene cuenta)">
             <input type="email" id="usr-email" placeholder="Correo electrónico (puede incluir números)" required>
             <div class="password-wrapper">
-              <input type="password" id="usr-pass" placeholder="Contraseña de acceso" required>
+              <input type="password" id="usr-pass" placeholder="Contraseña (solo si es cuenta nueva)">
               <button type="button" class="btn-toggle-pass" onclick="toggleVisibilidadPassword('usr-pass', this)">Mostrar</button>
             </div>
-            <small class="pass-hint">La contraseña tiene que tener números y mínimo una letra.</small>
+            <small class="pass-hint">Si creas cuenta nueva, la contraseña debe tener números y mínimo una letra.</small>
             <select id="usr-rol">
               <option value="ADMIN">Administrador (Comparte y puede editar todo)</option>
               <option value="VENDEDOR">Vendedor (Solo registra ventas y consulta)</option>
             </select>
             <div id="usr-error" class="error-box hidden"></div>
-            <button type="submit">Registrar en mi Equipo</button>
+            <button type="submit">Enviar Invitación / Registrar</button>
           </form>
         </div>
 

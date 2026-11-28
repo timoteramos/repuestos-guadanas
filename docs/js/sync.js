@@ -1,42 +1,22 @@
-const API_URL = 'https://api-repuestos-guadanas.onrender.com';
-
-function getSession() {
-  const data = localStorage.getItem('sesion_guadanas');
-  return data ? JSON.parse(data) : null;
-}
-
-async function registrarAuditoria(tabla, registroId, accion, anterior = null, nuevo = null) {
-  const sesion = getSession();
-  if (!sesion) return;
-
-  await db.auditoria_logs.add({
-    id: crypto.randomUUID(),
-    usuario_id: sesion.usuario.id,
-    tabla_afectada: tabla,
-    registro_id: registroId,
-    accion: accion,
-    detalle_anterior: anterior,
-    detalle_nuevo: nuevo,
-    fecha_hora: new Date().toISOString(),
-    sincronizado: 0
-  });
-}
+const API_URL = 'https://repuestos-guadanas-api.onrender.com';
 
 async function sincronizarDatos() {
+  if (!navigator.onLine) return;
   const sesion = getSession();
-  if (!sesion || !navigator.onLine) return;
+  if (!sesion) return;
 
   const btnSync = document.getElementById('btn-sync');
   if (btnSync) btnSync.textContent = 'Sincronizando...';
 
   try {
+    // 1. Subir cambios locales pendientes (PUSH)
     const repuestosPendientes = await db.repuestos.where('sincronizado').equals(0).toArray();
     const eliminadosPendientes = await db.repuestos_eliminados.toArray();
     const ventasPendientes = await db.ventas.where('sincronizado').equals(0).toArray();
     const gastosPendientes = await db.gastos.where('sincronizado').equals(0).toArray();
     const logsPendientes = await db.auditoria_logs.where('sincronizado').equals(0).toArray();
 
-    for (let v of ventasPendientes) {
+    for (const v of ventasPendientes) {
       v.detalles = await db.detalle_ventas.where('venta_id').equals(v.id).toArray();
     }
 
@@ -47,7 +27,7 @@ async function sincronizarDatos() {
       gastosPendientes.length > 0 ||
       logsPendientes.length > 0
     ) {
-      const pushRes = await fetch(`${API_URL}/sync/push`, {
+      const resPush = await fetch(`${API_URL}/sync/push`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -62,62 +42,71 @@ async function sincronizarDatos() {
         })
       });
 
-      if (pushRes.ok) {
-        await db.repuestos.bulkPut(repuestosPendientes.map(r => ({
-          ...r,
-          stock_actual: Math.max(0, r.stock_actual),
-          sincronizado: 1
-        })));
-        await db.repuestos_eliminados.clear();
-        await db.ventas.bulkPut(ventasPendientes.map(v => {
-          const { detalles, ...ventaSinDetalles } = v;
-          return { ...ventaSinDetalles, sincronizado: 1 };
-        }));
-        await db.gastos.bulkPut(gastosPendientes.map(g => ({ ...g, sincronizado: 1 })));
-        await db.auditoria_logs.bulkPut(logsPendientes.map(l => ({ ...l, sincronizado: 1 })));
+      if (resPush.ok) {
+        for (const r of repuestosPendientes) await db.repuestos.update(r.id, { sincronizado: 1 });
+        if (eliminadosPendientes.length > 0) {
+          await db.repuestos_eliminados.bulkDelete(eliminadosPendientes.map(e => e.id));
+        }
+        for (const v of ventasPendientes) await db.ventas.update(v.id, { sincronizado: 1 });
+        for (const g of gastosPendientes) await db.gastos.update(g.id, { sincronizado: 1 });
+        for (const l of logsPendientes) await db.auditoria_logs.update(l.id, { sincronizado: 1 });
       }
     }
 
-    const lastSync = localStorage.getItem('last_sync_time');
-    const urlPull = lastSync ? `${API_URL}/sync/pull?since=${encodeURIComponent(lastSync)}` : `${API_URL}/sync/pull`;
-
-    const pullRes = await fetch(urlPull, {
+    // 2. Descargar datos actualizados de este negocio (PULL)
+    const resPull = await fetch(`${API_URL}/sync/pull`, {
       headers: { 'Authorization': `Bearer ${sesion.access_token}` }
     });
 
-    if (pullRes.ok) {
-      const data = await pullRes.json();
-      if (data.usuarios?.length) await db.usuarios.bulkPut(data.usuarios);
-      if (data.repuestos?.length) {
-        await db.repuestos.bulkPut(data.repuestos.map(r => ({
-          ...r,
-          stock_actual: Math.max(0, r.stock_actual),
-          sincronizado: 1
-        })));
+    if (resPull.ok) {
+      const data = await resPull.json();
+
+      // Actualizar estado de invitación o equipo en sesión actual
+      if (data.usuario_actual) {
+        sesion.usuario = { ...sesion.usuario, ...data.usuario_actual };
+        localStorage.setItem('sesion_guadanas', JSON.stringify(sesion));
+        if (typeof actualizarBannerInvitacionYEquipo === 'function') {
+          actualizarBannerInvitacionYEquipo(sesion);
+        }
       }
-      if (data.ventas?.length) {
+
+      if (data.usuarios) await db.usuarios.bulkPut(data.usuarios);
+
+      if (data.repuestos) {
+        const idsServidor = new Set(data.repuestos.map(r => r.id));
+        const localesSincronizados = await db.repuestos.where('sincronizado').equals(1).toArray();
+        for (const loc of localesSincronizados) {
+          if (!idsServidor.has(loc.id)) {
+            await db.repuestos.delete(loc.id);
+          }
+        }
+        await db.repuestos.bulkPut(data.repuestos.map(r => ({ ...r, sincronizado: 1 })));
+      }
+
+      if (data.ventas) {
         for (const v of data.ventas) {
-          const { detalles, ...ventaBase } = v;
-          await db.ventas.put({ ...ventaBase, sincronizado: 1 });
-          if (detalles?.length) {
-            await db.detalle_ventas.bulkPut(detalles);
+          const { detalles, ...ventaCabecera } = v;
+          await db.ventas.put({ ...ventaCabecera, sincronizado: 1 });
+          if (detalles) {
+            await db.detalle_ventas.bulkPut(detalles.map(d => ({ ...d, sincronizado: 1 })));
           }
         }
       }
-      if (data.gastos?.length) {
+
+      if (data.gastos) {
         await db.gastos.bulkPut(data.gastos.map(g => ({ ...g, sincronizado: 1 })));
       }
-      if (data.auditoria?.length) {
+
+      if (data.auditoria) {
         await db.auditoria_logs.bulkPut(data.auditoria.map(a => ({ ...a, sincronizado: 1 })));
       }
-      localStorage.setItem('last_sync_time', data.server_time);
+      localStorage.setItem('ultima_sync', data.server_time);
     }
-
-    if (typeof renderizarTodo === 'function') await renderizarTodo();
   } catch (err) {
-    console.warn('Sin conexión estable para sincronizar:', err);
+    console.warn('Sincronización en espera (modo offline):', err);
   } finally {
     if (btnSync) btnSync.textContent = 'Sincronizar';
+    if (typeof renderizarTodo === 'function') renderizarTodo();
   }
 }
 
