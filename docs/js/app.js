@@ -47,9 +47,9 @@ function toggleVisibilidadPassword(inputId, btn) {
 
 function validarContrasenaCliente(pass) {
   const tieneLetra = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(pass);
-  const tieneNumero = /\d/.test(pass);
+  const tieneNumero = /[0-9]/.test(pass);
   if (!tieneLetra || !tieneNumero) {
-    return 'Error en contraseña: debe incluir al menos una letra y un número.';
+    return 'Error en contraseña: debe tener números y mínimo una letra.';
   }
   return null;
 }
@@ -70,7 +70,7 @@ function esMetodoPagoPendiente(metodo) {
   return metodo === 'Pagos Pendientes' || metodo === 'Fiado';
 }
 
-// --- AUTENTICACIÓN Y REGISTRO DE CUENTA NUEVA ---
+// --- AUTENTICACIÓN, REGISTRO Y ELIMINACIÓN DE CUENTA ---
 function mostrarFormularioRegistroPublico(mostrar) {
   mostrarErrorCaja('login-error', '');
   mostrarErrorCaja('reg-error', '');
@@ -160,6 +160,45 @@ async function cerrarSesion() {
     await limpiarBaseLocalPorCambioCuenta();
     localStorage.removeItem('sesion_guadanas');
     location.reload();
+  }
+}
+
+async function eliminarMiCuenta() {
+  const sesion = getSession();
+  if (!sesion) return;
+
+  if (!navigator.onLine) {
+    return alert('Necesitas conexión a internet para eliminar tu cuenta del servidor.');
+  }
+
+  const confirmar1 = confirm(
+    `¿Estás seguro de que quieres eliminar la cuenta "${sesion.usuario.nombre}" (${sesion.usuario.email})?\n\nSi la eliminas, toda la información que tenía esta cuenta se borrará permanentemente.`
+  );
+  if (!confirmar1) return;
+
+  const confirmar2 = confirm(
+    'CONFIRMACIÓN FINAL: Esta acción NO se puede deshacer y eliminará todos los datos asociados. ¿Deseas eliminar la cuenta definitivamente?'
+  );
+  if (!confirmar2) return;
+
+  try {
+    const res = await fetch(`${API_URL}/auth/eliminar-cuenta`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${sesion.access_token}`
+      }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || `Error al eliminar la cuenta (código ${res.status}).`);
+    }
+
+    await limpiarBaseLocalPorCambioCuenta();
+    localStorage.removeItem('sesion_guadanas');
+    alert(data.mensaje || 'Tu cuenta y toda su información han sido eliminadas.');
+    location.reload();
+  } catch (err) {
+    alert(`No se pudo eliminar la cuenta: ${err.message}`);
   }
 }
 
@@ -1208,6 +1247,7 @@ async function renderizarTodo() {
     });
   }
 }
+
 // --- NAVEGACIÓN HORIZONTAL CON DEDO (SWIPE) O PUNTERO ---
 const ORDEN_TABS = [
   { tabId: 'tab-inicio', navId: 'nav-inicio' },
@@ -1226,7 +1266,7 @@ function obtenerIndiceTabActiva() {
 
 function cambiarTabPorDireccion(direccion) {
   const actual = obtenerIndiceTabActiva();
-  if (actual === -1) return; // No interfiere si está abierta la subvista de Registro de Ventas
+  if (actual === -1) return;
 
   const siguiente = actual + direccion;
   if (siguiente < 0 || siguiente >= ORDEN_TABS.length) return;
@@ -1249,7 +1289,6 @@ function cambiarTabPorDireccion(direccion) {
     );
   };
 
-  // 1. Gesto táctil en celular (deslizar dedo a izquierda o derecha)
   document.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1 || esElementoInteractivo(e.target)) {
       gestoValido = false;
@@ -1267,13 +1306,11 @@ function cambiarTabPorDireccion(direccion) {
     const deltaX = e.changedTouches[0].clientX - inicioX;
     const deltaY = e.changedTouches[0].clientY - inicioY;
 
-    // Requiere desplazamiento horizontal claro (mínimo 55px) y mayor que el scroll vertical
     if (Math.abs(deltaX) > 55 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4) {
       cambiarTabPorDireccion(deltaX < 0 ? 1 : -1);
     }
   }, { passive: true });
 
-  // 2. Arrastre con puntero/ratón en computador
   document.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch' || e.button !== 0 || esElementoInteractivo(e.target)) {
       gestoValido = false;
@@ -1296,7 +1333,6 @@ function cambiarTabPorDireccion(direccion) {
     }
   });
 
-  // 3. Deslizar puntero/dedo sobre la barra inferior de navegación
   const bottomNav = document.querySelector('.bottom-nav');
   if (bottomNav) {
     bottomNav.addEventListener('pointermove', (e) => {

@@ -5,7 +5,7 @@ from typing import List, Optional, Any
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 
 from database import get_db, engine
@@ -121,24 +121,30 @@ def obtener_negocio_id(user: Usuario, db: Session) -> uuid.UUID:
         db.commit()
     return user.negocio_id
 
+def normalizar_email(email: str) -> str:
+    return email.strip().lower()
+
 def validar_password_segura(password: str):
-    if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]", password) or not re.search(r"\d", password):
+    if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]", password) or not re.search(r"[0-9]", password):
         raise HTTPException(
             status_code=400,
-            detail="La contraseña debe contener al menos una letra y un número."
+            detail="La contraseña debe tener números y mínimo una letra."
         )
 
 # --- ENDPOINTS DE AUTENTICACIÓN ---
 
 @app.post("/auth/register")
 def registrar_cuenta_nueva(data: RegistroPublicoRequest, db: Session = Depends(get_db)):
-    email_limpio = data.email.lower().strip()
+    email_limpio = normalizar_email(data.email)
     if not data.nombre.strip():
         raise HTTPException(status_code=400, detail="Debes escribir tu nombre o el nombre del local.")
+    if "@" not in email_limpio or "." not in email_limpio.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Ingresa un correo electrónico válido (ej. usuario1@correo.com).")
     validar_password_segura(data.password)
 
-    if db.query(Usuario).filter(Usuario.email == email_limpio).first():
-        raise HTTPException(status_code=400, detail="Ese correo electrónico ya está registrado. Intenta iniciar sesión.")
+    existe = db.query(Usuario).filter(func.lower(func.trim(Usuario.email)) == email_limpio).first()
+    if existe:
+        raise HTTPException(status_code=400, detail=f"El correo '{email_limpio}' ya está registrado. Inicia sesión o usa otro correo.")
 
     nuevo_id = uuid.uuid4()
     negocio_id = uuid.uuid4()
@@ -169,7 +175,8 @@ def registrar_cuenta_nueva(data: RegistroPublicoRequest, db: Session = Depends(g
 
 @app.post("/auth/login")
 def login(data: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(Usuario).filter(Usuario.email == data.email.lower().strip()).first()
+    email_limpio = normalizar_email(data.email)
+    user = db.query(Usuario).filter(func.lower(func.trim(Usuario.email)) == email_limpio).first()
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
     if not user.activo:
@@ -190,21 +197,25 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 
 @app.post("/usuarios", dependencies=[Depends(require_admin)])
 def crear_usuario(data: CrearUsuarioRequest, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    email_limpio = normalizar_email(data.email)
     if data.rol not in ["ADMIN", "VENDEDOR"]:
         raise HTTPException(status_code=400, detail="El rol seleccionado debe ser Administrador o Vendedor.")
     if not data.nombre.strip():
         raise HTTPException(status_code=400, detail="Debes escribir el nombre del usuario.")
+    if "@" not in email_limpio or "." not in email_limpio.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Ingresa un correo electrónico válido (ej. empleado2@correo.com).")
     validar_password_segura(data.password)
 
-    if db.query(Usuario).filter(Usuario.email == data.email.lower().strip()).first():
-        raise HTTPException(status_code=400, detail="Ese correo electrónico ya está registrado en el sistema.")
+    existe = db.query(Usuario).filter(func.lower(func.trim(Usuario.email)) == email_limpio).first()
+    if existe:
+        raise HTTPException(status_code=400, detail=f"El correo '{email_limpio}' ya está registrado en el sistema.")
 
     negocio_id = obtener_negocio_id(current_user, db)
     nuevo = Usuario(
         id=uuid.uuid4(),
         negocio_id=negocio_id,
         nombre=data.nombre.strip(),
-        email=data.email.lower().strip(),
+        email=email_limpio,
         password_hash=hash_password(data.password),
         rol=data.rol,
         activo=True,
@@ -213,6 +224,38 @@ def crear_usuario(data: CrearUsuarioRequest, current_user: Usuario = Depends(get
     db.add(nuevo)
     db.commit()
     return {"mensaje": f"Usuario {nuevo.nombre} ({nuevo.rol}) agregado a tu equipo", "id": str(nuevo.id)}
+
+@app.delete("/auth/eliminar-cuenta")
+def eliminar_cuenta_actual(current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Elimina la cuenta del usuario actual. Si es el último ADMIN o dueño del negocio, borra toda la información del negocio."""
+    negocio_id = obtener_negocio_id(current_user, db)
+
+    otros_admins = db.query(Usuario).filter(
+        Usuario.negocio_id == negocio_id,
+        Usuario.rol == "ADMIN",
+        Usuario.id != current_user.id
+    ).count()
+
+    # Si es ADMIN y no quedan otros administradores en ese negocio, borrar absolutamente toda la data del negocio
+    if current_user.rol == "ADMIN" and otros_admins == 0:
+        ventas_ids = [v.id for v in db.query(Venta.id).filter(Venta.negocio_id == negocio_id).all()]
+        if ventas_ids:
+            db.query(DetalleVenta).filter(DetalleVenta.venta_id.in_(ventas_ids)).delete(synchronize_session=False)
+
+        db.query(Venta).filter(Venta.negocio_id == negocio_id).delete(synchronize_session=False)
+        db.query(Gasto).filter(Gasto.negocio_id == negocio_id).delete(synchronize_session=False)
+        db.query(AuditoriaLog).filter(AuditoriaLog.negocio_id == negocio_id).delete(synchronize_session=False)
+        db.query(Repuesto).filter(Repuesto.negocio_id == negocio_id).delete(synchronize_session=False)
+        db.query(Usuario).filter(Usuario.negocio_id == negocio_id).delete(synchronize_session=False)
+        db.commit()
+        return {"mensaje": "Tu cuenta y toda la información asociada han sido eliminadas por completo."}
+
+    # Si es VENDEDOR o un ADMIN secundario invitado, eliminar sus registros propios y su cuenta
+    db.query(AuditoriaLog).filter(AuditoriaLog.usuario_id == current_user.id).delete(synchronize_session=False)
+    db.query(Repuesto).filter(Repuesto.updated_by == current_user.id).update({"updated_by": None}, synchronize_session=False)
+    db.delete(current_user)
+    db.commit()
+    return {"mensaje": "Tu cuenta de usuario ha sido eliminada por completo."}
 
 # --- ENDPOINTS DE SINCRONIZACIÓN AISLADA POR NEGOCIO ---
 

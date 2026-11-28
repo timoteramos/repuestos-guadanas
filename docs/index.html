@@ -36,12 +36,12 @@
       <p style="color:var(--muted); font-size:13px;">Tu cuenta tendrá su propio inventario, ventas y gastos totalmente independientes y privados.</p>
       <form onsubmit="registrarCuentaNueva(event)">
         <input type="text" id="reg-nombre" placeholder="Tu nombre o nombre del local" required>
-        <input type="email" id="reg-email" placeholder="Correo electrónico" required>
+        <input type="email" id="reg-email" placeholder="Correo electrónico (puede incluir números)" required>
         <div class="password-wrapper">
           <input type="password" id="reg-pass" placeholder="Crea una contraseña" required>
           <button type="button" class="btn-toggle-pass" onclick="toggleVisibilidadPassword('reg-pass', this)">Mostrar</button>
         </div>
-        <small class="pass-hint">La contraseña tiene que tener al menos un número y mínimo una letra.</small>
+        <small class="pass-hint">La contraseña tiene que tener números y mínimo una letra.</small>
         <button type="submit">Crear mi Cuenta y Entrar</button>
       </form>
       <div id="reg-error" class="error-box hidden"></div>
@@ -77,7 +77,7 @@
           Registro de Ventas y Pagos Pendientes
         </button>
 
-        <!-- TARJETAS DEL DÍA: VENDIDO HOY, GASTOS DE HOY E INGRESOS NETOS DE HOY -->
+        <!-- TARJETAS DEL DÍA -->
         <div class="card kpi-card">
           <small style="color:var(--muted); font-weight:600; text-transform:uppercase;">Total vendido hoy</small>
           <div id="inicio-total-hoy" style="font-size:26px; font-weight:800; color:var(--primary); margin-top:4px;">$0</div>
@@ -256,7 +256,8 @@
       <!-- PESTAÑA 5: CUENTA -->
       <section id="tab-admin" class="tab-content hidden">
         <div class="card">
-          <button class="danger" style="margin-bottom:0;" onclick="cerrarSesion()">Cerrar Sesión</button>
+          <button class="secondary" style="margin-bottom:10px;" onclick="cerrarSesion()">Cerrar Sesión</button>
+          <button class="danger" style="margin-bottom:0;" onclick="eliminarMiCuenta()">Eliminar Cuenta</button>
         </div>
 
         <div class="card admin-only">
@@ -277,12 +278,12 @@
           <p style="font-size:12.5px; color:var(--muted); margin-top:0;">Las personas que agregues aquí compartirán exactamente tu mismo inventario, ventas y gastos.</p>
           <form onsubmit="crearNuevoUsuario(event)">
             <input type="text" id="usr-nombre" placeholder="Nombre de la persona" required>
-            <input type="email" id="usr-email" placeholder="Correo electrónico" required>
+            <input type="email" id="usr-email" placeholder="Correo electrónico (puede incluir números)" required>
             <div class="password-wrapper">
               <input type="password" id="usr-pass" placeholder="Contraseña de acceso" required>
               <button type="button" class="btn-toggle-pass" onclick="toggleVisibilidadPassword('usr-pass', this)">Mostrar</button>
             </div>
-            <small class="pass-hint">La contraseña tiene que tener al menos un número y mínimo una letra.</small>
+            <small class="pass-hint">La contraseña tiene que tener números y mínimo una letra.</small>
             <select id="usr-rol">
               <option value="ADMIN">Administrador (Comparte y puede editar todo)</option>
               <option value="VENDEDOR">Vendedor (Solo registra ventas y consulta)</option>
