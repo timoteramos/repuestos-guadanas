@@ -1208,3 +1208,104 @@ async function renderizarTodo() {
     });
   }
 }
+// --- NAVEGACIÓN HORIZONTAL CON DEDO (SWIPE) O PUNTERO ---
+const ORDEN_TABS = [
+  { tabId: 'tab-inicio', navId: 'nav-inicio' },
+  { tabId: 'tab-ventas', navId: 'nav-ventas' },
+  { tabId: 'tab-inventario', navId: 'nav-inventario' },
+  { tabId: 'tab-gastos', navId: 'nav-gastos' },
+  { tabId: 'tab-admin', navId: 'nav-admin' }
+];
+
+function obtenerIndiceTabActiva() {
+  return ORDEN_TABS.findIndex(t => {
+    const el = document.getElementById(t.tabId);
+    return el && !el.classList.contains('hidden');
+  });
+}
+
+function cambiarTabPorDireccion(direccion) {
+  const actual = obtenerIndiceTabActiva();
+  if (actual === -1) return; // No interfiere si está abierta la subvista de Registro de Ventas
+
+  const siguiente = actual + direccion;
+  if (siguiente < 0 || siguiente >= ORDEN_TABS.length) return;
+
+  const destino = ORDEN_TABS[siguiente];
+  const btnNav = document.getElementById(destino.navId);
+  mostrarTab(destino.tabId, btnNav);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+(function inicializarGestosHorizontales() {
+  let inicioX = 0;
+  let inicioY = 0;
+  let gestoValido = false;
+
+  const esElementoInteractivo = (target) => {
+    if (!target) return false;
+    return Boolean(
+      target.closest('input, select, textarea, button, a, .table-responsive')
+    );
+  };
+
+  // 1. Gesto táctil en celular (deslizar dedo a izquierda o derecha)
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || esElementoInteractivo(e.target)) {
+      gestoValido = false;
+      return;
+    }
+    inicioX = e.touches[0].clientX;
+    inicioY = e.touches[0].clientY;
+    gestoValido = true;
+  }, { passive: true });
+
+  document.addEventListener('touchend', (e) => {
+    if (!gestoValido || e.changedTouches.length !== 1) return;
+    gestoValido = false;
+
+    const deltaX = e.changedTouches[0].clientX - inicioX;
+    const deltaY = e.changedTouches[0].clientY - inicioY;
+
+    // Requiere desplazamiento horizontal claro (mínimo 55px) y mayor que el scroll vertical
+    if (Math.abs(deltaX) > 55 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4) {
+      cambiarTabPorDireccion(deltaX < 0 ? 1 : -1);
+    }
+  }, { passive: true });
+
+  // 2. Arrastre con puntero/ratón en computador
+  document.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.button !== 0 || esElementoInteractivo(e.target)) {
+      gestoValido = false;
+      return;
+    }
+    inicioX = e.clientX;
+    inicioY = e.clientY;
+    gestoValido = true;
+  });
+
+  document.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'touch' || !gestoValido) return;
+    gestoValido = false;
+
+    const deltaX = e.clientX - inicioX;
+    const deltaY = e.clientY - inicioY;
+
+    if (Math.abs(deltaX) > 70 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      cambiarTabPorDireccion(deltaX < 0 ? 1 : -1);
+    }
+  });
+
+  // 3. Deslizar puntero/dedo sobre la barra inferior de navegación
+  const bottomNav = document.querySelector('.bottom-nav');
+  if (bottomNav) {
+    bottomNav.addEventListener('pointermove', (e) => {
+      if (e.buttons !== 1 && e.pointerType !== 'touch') return;
+      const elemBajoPuntero = document.elementFromPoint(e.clientX, e.clientY);
+      const btn = elemBajoPuntero?.closest('.bottom-nav button');
+      if (btn && !btn.classList.contains('active')) {
+        btn.click();
+      }
+    });
+  }
+})();

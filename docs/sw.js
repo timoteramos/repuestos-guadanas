@@ -1,4 +1,4 @@
-const CACHE_NAME = 'guadanas-pos-v7';
+const CACHE_NAME = 'guadanas-pos-v8';
 const ASSETS = [
   './',
   './index.html',

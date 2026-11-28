@@ -262,3 +262,23 @@ button.small { width: auto; padding: 6px 10px; font-size: 12px; margin: 0; }
   font-size: 13.5px;
   margin-bottom: 10px;
 }
+/* Navegación por gesto horizontal (dedo o puntero) */
+main.container {
+  touch-action: pan-y;
+  min-height: calc(100vh - 125px);
+}
+
+.tab-content {
+  animation: fadeSlideTab 0.18s ease-out;
+}
+
+@keyframes fadeSlideTab {
+  from {
+    opacity: 0.65;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
